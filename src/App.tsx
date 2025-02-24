@@ -85,7 +85,7 @@ function App() {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return(   <Route path="/login" element={<Login />} />);
+      return(   <Login />);
     }
   }
 

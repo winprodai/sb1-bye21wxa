@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bell, Search, User, Menu, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import {supabase } from '../lib/supabase';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -11,8 +12,11 @@ const Header = ({ onMenuClick }: HeaderProps) => {
   const navigate = useNavigate();
   const isLoggedIn = localStorage.getItem('mockUser') !== null;
 
-  const handleLogout = () => {
-    localStorage.removeItem('mockUser');
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+        console.error('Sign out error:', error);
+      }
     navigate('/login');
   };
 

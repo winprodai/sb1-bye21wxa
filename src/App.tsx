@@ -74,6 +74,25 @@ function App() {
     setSidebarOpen(!sidebarOpen);
   };
 
+
+  useEffect(() => {
+   
+    const fetchUser= async ()=>{
+
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return(   <Route path="/login" element={<Login />} />);
+    }
+  }
+
+  
+  fetchUser();
+  }, []);
+
   return (
     <AuthProvider>
       <Router>

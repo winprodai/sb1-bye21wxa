@@ -19,6 +19,7 @@ import {
   Crown,
   User
 } from 'lucide-react';
+import {supabase } from '../lib/supabase';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -45,8 +46,11 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
     { icon: TikTok, label: 'TikTok', url: 'https://tiktok.com' }
   ];
 
-  const handleLogout = () => {
-    localStorage.removeItem('mockUser');
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+        console.error('Sign out error:', error);
+      }
     navigate('/login');
   };
 

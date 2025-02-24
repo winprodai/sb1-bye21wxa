@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Shield
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface BillingHistoryItem {
   id: string;
@@ -98,8 +99,11 @@ const Account = () => {
     setTimeout(() => setSuccess(false), 3000);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('mockUser');
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+        console.error('Sign out error:', error);
+      }
     navigate('/login');
   };
 

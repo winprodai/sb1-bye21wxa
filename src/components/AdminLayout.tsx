@@ -7,9 +7,22 @@ import {
   LogOut,
   UserCircle
 } from 'lucide-react';
+import {supabase } from '../lib/supabase';
+import {  useNavigate } from 'react-router-dom';
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+
+
+  const handleLogout = async ()=>{
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+        console.error('Sign out error:', error);
+      }
+    navigate('/login');
+
+  }
 
   const navigation = [
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
@@ -58,7 +71,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
           {/* Footer */}
           <div className="p-4 border-t border-gray-200">
-            <button className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50">
+            <button                   onClick={handleLogout} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50">
               <LogOut size={18} />
               <span className="font-medium">Logout</span>
             </button>

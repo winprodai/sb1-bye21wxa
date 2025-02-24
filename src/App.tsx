@@ -68,6 +68,7 @@ function ProtectedAdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const [isLogin, setIsLogin] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const toggleSidebar = () => {
@@ -75,7 +76,7 @@ function App() {
   };
 
 
-  useEffect(() => {
+  useEffect(() => {    
    
     const fetchUser= async ()=>{
 
@@ -85,13 +86,16 @@ function App() {
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return(   <Login />);
+      setIsLogin(false);
     }
+    else setIsLogin(true);
   }
 
   
   fetchUser();
   }, []);
+
+  if(!isLogin) return ( <AuthProvider><Router><Routes><Route path="*" element={<Login />} /></Routes></Router></AuthProvider>);
 
   return (
     <AuthProvider>

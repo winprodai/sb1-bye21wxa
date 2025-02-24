@@ -28,70 +28,12 @@ const Login = () => {
 
     if (signInError) throw signInError;
 
-      // If sign in fails, create a new account
-      // if (signInError) {
-      //   const { data: signUpData, error: signUpError } =
-      //     await supabase.auth.signUp({
-      //       email,
-      //       password,
-      //       options: {
-      //         data: {
-      //           full_name: email.split('@')[0],
-      //         },
-      //       },
-      //     });
-
-      //   if (signUpError) throw signUpError;
-      //   if (!signUpData.user) throw new Error('No user data returned');
-
-      //   // Create customer record for new user
-      //   const { error: customerError } = await supabase
-      //     .from('customers')
-      //     .insert({
-      //       user_id: signUpData.user.id,
-      //       email: signUpData.user.email,
-      //       full_name:
-      //         signUpData.user.user_metadata?.full_name || email.split('@')[0],
-      //       subscription_status: 'free',
-      //       subscription_tier: 'free',
-      //       last_login: new Date().toISOString(),
-      //     });
-
-      //   if (customerError) {
-      //     console.error('Error creating customer record:', customerError);
-      //   }
-
-      //   // Store session in localStorage for preview environment
-      //   localStorage.setItem(
-      //     'sb-auth-token',
-      //     signUpData.session?.access_token || ''
-      //   );
-      //   localStorage.setItem(
-      //     'mockUser',
-      //     JSON.stringify({
-      //       id: signUpData.user.id,
-      //       email: signUpData.user.email,
-      //     })
-      //   );
-
-      //   navigate('/dashboard');
-      //   return;
-      // }
-
+    
       if (!signInData.user) throw new Error('No user data returned');
 
-      // Store session in localStorage for preview environment
-      localStorage.setItem(
-        'sb-auth-token',
-        signInData.session?.access_token || ''
-      );
-      localStorage.setItem(
-        'mockUser',
-        JSON.stringify({
-          id: signInData.user.id,
-          email: signInData.user.email,
-        })
-      );
+  
+     console.log("ici");
+     
 
       // Try to update last login for existing customer
       const { error: updateError } = await supabase.from('customers').upsert({

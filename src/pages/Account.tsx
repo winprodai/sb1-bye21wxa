@@ -20,7 +20,7 @@ interface BillingHistoryItem {
   date: string;
   amount: number;
   status: 'paid' | 'failed' | 'pending';
-  description: string;
+  description: string; 
 }
 
 const Account = () => {

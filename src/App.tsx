@@ -1,36 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from "react";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
   Navigate,
-} from 'react-router-dom';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import Sidebar from './components/Sidebar';
-import AdminLayout from './components/AdminLayout';
-import Dashboard from './pages/Dashboard';
-import Courses from './pages/Courses';
-import Ebooks from './pages/Ebooks';
-import Support from './pages/Support';
-import FAQ from './pages/FAQ';
-import Privacy from './pages/Privacy';
-import Terms from './pages/Terms';
-import Register from './pages/Register';
-import Login from './pages/Login';
-import Account from './pages/Account';
-import Pricing from './pages/Pricing';
-import ProductDetails from './pages/ProductDetails';
-import SavedProducts from './pages/SavedProducts';
-import Home from './pages/Home';
-import Footer from './components/Footer';
-import AdminDashboard from './pages/admin/Dashboard';
-import AdminProducts from './pages/admin/Products';
-import AdminUsers from './pages/admin/Users';
-import AdminCustomers from './pages/admin/Customers';
-import AdminLogin from './pages/admin/Login';
-import AuthCallback from './pages/auth/Callback';
-import Header from './components/Header';
-import { supabase } from './lib/supabase';
+  useNavigate,
+} from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import Sidebar from "./components/Sidebar";
+import AdminLayout from "./components/AdminLayout";
+import Dashboard from "./pages/Dashboard";
+import Courses from "./pages/Courses";
+import Ebooks from "./pages/Ebooks";
+import Support from "./pages/Support";
+import FAQ from "./pages/FAQ";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import Register from "./pages/Register";
+import Login from "./pages/Login";
+import Account from "./pages/Account";
+import Pricing from "./pages/Pricing";
+import ProductDetails from "./pages/ProductDetails";
+import SavedProducts from "./pages/SavedProducts";
+import Home from "./pages/Home";
+import Footer from "./components/Footer";
+import AdminDashboard from "./pages/admin/Dashboard";
+import AdminProducts from "./pages/admin/Products";
+import AdminUsers from "./pages/admin/Users";
+import AdminCustomers from "./pages/admin/Customers";
+import AdminLogin from "./pages/admin/Login";
+import AuthCallback from "./pages/auth/Callback";
+import Header from "./components/Header";
+import { supabase } from "./lib/supabase";
+import NotFound from "./pages/NotFound";
+import AuthLoader from "./components/AuthLoader";
+import AdminRegister from "./pages/admin/Register";
+import { checkIsAdmin } from "./lib/utils";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   useEffect((): any => {
@@ -45,9 +50,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       }
 
       if (error) {
-        console.error('Error fetching user:', error);
+        console.error("Error fetching user:", error);
       } else {
-        console.log('User:', user);
+        console.log("User:", user);
       }
     }
 
@@ -58,9 +63,45 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function ProtectedAdminRoute({ children }: { children: React.ReactNode }) {
-  const { isAdmin } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const navigate = useNavigate();
+  const [authLoader, setAuthLoader] = useState(true);
+  useEffect(() => {
+    const checkInitial = async () => {
+      try {
+        setAuthLoader(true); 
 
-  if (!isAdmin) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.user) {
+          setAuthLoader(false);
+          return;
+        }
+
+        const sessionUserId = session.user.id;
+
+        const isAdmin = await checkIsAdmin(sessionUserId);
+
+        if (isAdmin) {
+          setIsAdmin(true);
+        } else {
+          setIsAdmin(false);
+        }
+      } catch (error) {
+        console.error("Error checking admin status:", error);
+      } finally {
+        setAuthLoader(false);
+      }
+    };
+
+    checkInitial();
+  }, []);
+
+  if (authLoader) {
+    return <AuthLoader />;
+  } else if (!isAdmin) {
     return <Navigate to="/admin/login" replace />;
   }
 
@@ -70,32 +111,61 @@ function ProtectedAdminRoute({ children }: { children: React.ReactNode }) {
 function App() {
   const [isLogin, setIsLogin] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   const toggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
   };
 
+  useEffect(() => {
+    const fetchUser = async () => {
+      setIsCheckingAuth(true);
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
 
-  useEffect(() => {    
-   
-    const fetchUser= async ()=>{
+      if (!user) {
+        setIsLogin(false);
+      } else {
+        setIsLogin(true);
+      }
+      setIsCheckingAuth(false);
+    };
+    fetchUser();
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setIsLogin(!!session?.user);
+      }
+    );
 
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setIsLogin(false);
-    }
-    else setIsLogin(true);
-  }
-
-  
-  fetchUser();
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
-  if(!isLogin) return ( <AuthProvider><Router><Routes><Route path="*" element={<Login />} /></Routes></Router></AuthProvider>);
+  if (isCheckingAuth) {
+    return <AuthLoader />;
+  }
+
+  if (!isLogin) {
+    return (
+      <AuthProvider>
+        <Router>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/admin">
+              <Route index element={<AdminLogin />} />
+              <Route path="login" element={<AdminLogin />} />
+              <Route path="register" element={<AdminRegister />} />
+            </Route>
+            <Route path="*" element={<Login />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    );
+  }
 
   return (
     <AuthProvider>
@@ -117,6 +187,7 @@ function App() {
               }
             />
             <Route path="login" element={<AdminLogin />} />
+            <Route path="register" element={<AdminRegister />} />
             <Route
               path="products"
               element={
@@ -150,8 +221,50 @@ function App() {
           </Route>
 
           {/* Auth Routes */}
-          <Route path="/register" element={<Register />} />
-          <Route path="/login" element={<Login />} />
+
+          <Route
+            path="/register"
+            element={
+              <ProtectedRoute>
+                <div className="min-h-screen bg-gray-50">
+                  <Header onMenuClick={toggleSidebar} />
+                  <Sidebar
+                    isOpen={sidebarOpen}
+                    onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
+                  />
+                  <div className="lg:ml-64">
+                    <main className="p-4 md:p-6">
+                      <Dashboard />
+                    </main>
+                    <Footer />
+                  </div>
+                </div>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/login"
+            element={
+              <ProtectedRoute>
+                <div className="min-h-screen bg-gray-50">
+                  <Header onMenuClick={toggleSidebar} />
+                  <Sidebar
+                    isOpen={sidebarOpen}
+                    onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
+                  />
+                  <div className="lg:ml-64">
+                    <main className="p-4 md:p-6">
+                      <Dashboard />
+                    </main>
+                    <Footer />
+                  </div>
+                </div>
+              </ProtectedRoute>
+            }
+          />
+
           <Route path="/pricing" element={<Pricing />} />
 
           {/* Public Routes */}
@@ -170,6 +283,7 @@ function App() {
                   <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
                   />
                   <div className="lg:ml-64">
                     <main>
@@ -190,6 +304,7 @@ function App() {
                   <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
                   />
                   <div className="lg:ml-64">
                     <main className="p-4 md:p-6">
@@ -210,6 +325,7 @@ function App() {
                   <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
                   />
                   <div className="lg:ml-64">
                     <main className="p-4 md:p-6">
@@ -230,6 +346,7 @@ function App() {
                   <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
                   />
                   <div className="lg:ml-64">
                     <main>
@@ -250,6 +367,7 @@ function App() {
                   <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
                   />
                   <div className="lg:ml-64">
                     <main>
@@ -270,6 +388,7 @@ function App() {
                   <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
                   />
                   <div className="lg:ml-64">
                     <main>
@@ -290,6 +409,7 @@ function App() {
                   <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
+                    onOpen={() => setSidebarOpen(true)}
                   />
                   <div className="lg:ml-64">
                     <main>
@@ -301,7 +421,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Router>
     </AuthProvider>

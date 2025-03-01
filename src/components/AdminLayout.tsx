@@ -20,7 +20,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     if (error) {
         console.error('Sign out error:', error);
       }
-    navigate('/login');
+    navigate('/admin/login');
 
   }
 

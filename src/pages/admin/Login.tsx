@@ -1,40 +1,69 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
-
-const MOCK_ADMIN = {
-  email: 'admin@winprod.ai',
-  password: 'Admin123!@#'
-};
+import React, { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { supabase } from "../../lib/supabase"; // Import Supabase instance
+import { checkIsAdmin } from "../../lib/utils";
 
 const AdminLogin = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const [authLoader, setAuthLoader] = useState(true);
+
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const checkInitial = async () => {
+      try {
+        setAuthLoader(true); 
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.user) {
+          setAuthLoader(false);
+          return;
+        }
+
+        const sessionUserId = session.user.id;
+
+        const isAdmin = await checkIsAdmin(sessionUserId);
+
+        if (isAdmin) {
+          navigate("/admin");
+        }
+      } catch (error) {
+        console.error("Error checking admin status:", error);
+      } finally {
+        setAuthLoader(false);
+      }
+    };
+
+    checkInitial();
+  }, []);
+
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    try {
-      setError('');
-      setLoading(true);
+    let isAdmin: any = false;
+    setError("");
+    setLoading(true);
 
-      // Mock admin validation
-      if (email === MOCK_ADMIN.email && password === MOCK_ADMIN.password) {
-        // Store admin session
-        localStorage.setItem('mockAdmin', JSON.stringify({
-          email: MOCK_ADMIN.email,
-          isAdmin: true,
-          timestamp: new Date().toISOString()
-        }));
-        navigate('/admin');
-      } else {
-        throw new Error('Invalid admin credentials');
-      }
+    try {
+      const { data: signInData, error: signInError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+      if (signInError) throw new Error(signInError.message);
+      isAdmin = await checkIsAdmin(signInData?.user?.id);
+      if (!isAdmin) throw new Error("Unauthorized: Not an admin");
+
+      navigate("/admin");
     } catch (error) {
-      setError('Invalid admin credentials');
+      setError(error instanceof Error ? error.message : "Login failed");
     } finally {
       setLoading(false);
     }
@@ -52,6 +81,15 @@ const AdminLogin = () => {
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             Sign in to admin panel
           </h2>
+          <p className="mt-2 text-center text-sm text-gray-400">
+            Don't have an admin account?{" "}
+            <Link
+              to="/admin/register"
+              className="font-medium text-primary hover:text-primary/90"
+            >
+              Sign up
+            </Link>
+          </p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (
@@ -100,7 +138,7 @@ const AdminLogin = () => {
               disabled={loading}
               className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? "Signing in..." : "Sign in"}
             </button>
           </div>
         </form>
@@ -108,5 +146,4 @@ const AdminLogin = () => {
     </div>
   );
 };
-
 export default AdminLogin;

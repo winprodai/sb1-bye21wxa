@@ -23,10 +23,11 @@ import {supabase } from '../lib/supabase';
 
 interface SidebarProps {
   isOpen: boolean;
+  onOpen: ()=> void;
   onClose: () => void;
 }
 
-const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
+const Sidebar = ({ isOpen, onClose,onOpen }: SidebarProps) => {
   const navigate = useNavigate();
   const [showResourcesDropdown, setShowResourcesDropdown] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -51,7 +52,7 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
     if (error) {
         console.error('Sign out error:', error);
       }
-    navigate('/login');
+      navigate('/login');
   };
 
   return (
@@ -66,7 +67,7 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
 
       {/* Mobile Menu Button */}
       <button 
-        onClick={() => isOpen ? onClose() : onClose()}
+        onClick={() => isOpen ? onClose() : onOpen()}
         className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-white hover:bg-gray-100 rounded-lg shadow-md"
       >
         {isOpen ? <X size={24} className="text-gray-600" /> : <Menu size={24} className="text-gray-600" />}

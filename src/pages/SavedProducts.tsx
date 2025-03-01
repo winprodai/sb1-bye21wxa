@@ -1,27 +1,25 @@
-import React from 'react';
 import { Bookmark, Search, Filter, ArrowRight } from 'lucide-react';
 
 const SavedProducts = () => {
-  // This would be managed by a global state management solution in a real app
-  const savedProducts = [
-    {
-      id: 1,
-      name: "Portable LED Ring Light",
-      image: "https://images.unsplash.com/photo-1603190287605-e6ade32fa852?auto=format&fit=crop&q=80&w=500",
-      price: "$29.99",
-      profit: "+156%",
-      engagement: "High",
-      savedAt: "2 days ago"
-    },
-    {
-      id: 2,
-      name: "Smart Plant Monitor",
-      image: "https://images.unsplash.com/photo-1585336261022-680e295ce3fe?auto=format&fit=crop&q=80&w=500",
-      price: "$39.99",
-      profit: "+142%",
-      engagement: "Medium",
-      savedAt: "3 days ago"
-    }
+  const savedProducts :any = [
+    // {
+    //   id: 1,
+    //   name: "Portable LED Ring Light",
+    //   image: "https://images.unsplash.com/photo-1603190287605-e6ade32fa852?auto=format&fit=crop&q=80&w=500",
+    //   price: "$29.99",
+    //   profit: "+156%",
+    //   engagement: "High",
+    //   savedAt: "2 days ago"
+    // },
+    // {
+    //   id: 2,
+    //   name: "Smart Plant Monitor",
+    //   image: "https://images.unsplash.com/photo-1585336261022-680e295ce3fe?auto=format&fit=crop&q=80&w=500",
+    //   price: "$39.99",
+    //   profit: "+142%",
+    //   engagement: "Medium",
+    //   savedAt: "3 days ago"
+    // }
   ];
 
   return (

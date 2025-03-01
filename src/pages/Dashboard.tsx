@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   TrendingUp,
   DollarSign,
@@ -18,6 +18,7 @@ import {
   X
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 // Generate 20 products for demonstration
 const generateProducts = () => {
@@ -83,7 +84,7 @@ const generateProducts = () => {
   });
 };
 
-const products = generateProducts();
+// const products = generateProducts();
 const PRODUCTS_PER_PAGE = 20;
 const TOTAL_PAGES = 14; // For demonstration, showing 277 total products
 
@@ -95,6 +96,20 @@ const Dashboard = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [savedProducts, setSavedProducts] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const [products,setProducts] =useState([])
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      const { data, error } = await supabase.from("products").select("*");
+      if (error) {
+        console.error("Error fetching products:", error);
+      } else {
+        setProducts(data);
+      }
+    };
+    fetchProducts();
+  }, []);
+
 
   const toggleSaveProduct = (productId: number) => {
     setSavedProducts(prev => {
@@ -243,13 +258,13 @@ const Dashboard = () => {
 
       {/* Products Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {products.map((product) => (
+        {products.map((product:any) => (
           <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200 hover:shadow-md transition-shadow duration-200">
             <div className="flex h-[180px]">
               {/* Product Image */}
               <div className="relative w-[180px] shrink-0">
                 <img 
-                  src={product.image} 
+                  src={product.images ? product.images[0] : '/'} 
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />

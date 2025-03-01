@@ -13,11 +13,11 @@ const Register = () => {
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-
+  
     try {
       setError('');
       setLoading(true);
-
+  
       // Sign up with Supabase
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -28,23 +28,21 @@ const Register = () => {
           }
         }
       });
-
+  
       if (signUpError) throw signUpError;
       if (!authData.user) throw new Error('No user data returned');
-
-      // Create customer record
       const { error: customerError } = await supabase
         .from('customers')
         .insert({
-          user_id: authData.user.id,
-          email: email,
+          user_id: authData.user.id, 
+          email,
           full_name: fullName,
           subscription_status: 'free',
           subscription_tier: 'basic'
         });
-
+  
       if (customerError) throw customerError;
-
+  
       navigate('/dashboard');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to create account');

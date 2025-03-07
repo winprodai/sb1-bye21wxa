@@ -10,7 +10,6 @@ import { AuthProvider } from "./contexts/AuthContext";
 import Sidebar from "./components/Sidebar";
 import AdminLayout from "./components/AdminLayout";
 import Dashboard from "./pages/Dashboard";
-import Courses from "./pages/Courses";
 import Ebooks from "./pages/Ebooks";
 import Support from "./pages/Support";
 import FAQ from "./pages/FAQ";
@@ -358,27 +357,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/courses"
-            element={
-              <ProtectedRoute>
-                <div className="min-h-screen bg-gray-50">
-                  <Header onMenuClick={toggleSidebar} />
-                  <Sidebar
-                    isOpen={sidebarOpen}
-                    onClose={() => setSidebarOpen(false)}
-                    onOpen={() => setSidebarOpen(true)}
-                  />
-                  <div className="lg:ml-64">
-                    <main>
-                      <Courses />
-                    </main>
-                    <Footer />
-                  </div>
-                </div>
-              </ProtectedRoute>
-            }
-          />
+         
           <Route
             path="/ebooks"
             element={

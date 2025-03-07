@@ -232,18 +232,21 @@ const ProductDetails = () => {
                 </button>
               </div>
 
-              <p className="text-gray-500 mb-2">Posted {product.postedDays} days ago</p>
+              <div className="flex justify-between items-center mb-2">
+                <p className="text-gray-500">Posted {product.postedDays} days ago</p>
 
-              {/* Categories display */}
-              {categories.length > 0 && (
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {categories.map((category, index) => (
-                    <span key={index} className="px-3 py-1 text-sm bg-gray-100 rounded-full text-gray-700">
-                      {category}
-                    </span>
-                  ))}
-                </div>
-              )}
+                {/* Categories display */}
+                {categories.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {categories.map((category, index) => (
+                      <span key={index} className="px-3 py-1 text-sm bg-gray-100 rounded-full text-gray-700">
+                        {category}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
 
               <div className="hidden sm:flex gap-4 mt-4">
                 <button className="bg-[#FF4646] hover:bg-[#FF4646]/90 text-white px-4 py-2 rounded-lg font-medium transition-colors">
@@ -255,8 +258,9 @@ const ProductDetails = () => {
                 </button>
               </div>
 
-              <p className="pt-4">{product?.description}</p>
+             
             </div>
+
             <div className="bg-white rounded-2xl border border-gray-300 shadow-md">
               {/* Header Section */}
               <div className="bg-gray-100 w-full rounded-t-2xl py-3 border-b border-gray-300 flex justify-center">
@@ -284,6 +288,28 @@ const ProductDetails = () => {
                 </div>
               </div>
             </div>
+
+               {/* Product Description Section */}
+               {product?.description && (
+                <div className="bg-white rounded-2xl border border-gray-300 shadow-md mt-6">
+                  
+                  {/* Header Section (Styled same as "Your Profit & Cost") */}
+                  <div className="bg-gray-100 w-full rounded-t-2xl py-3 border-b border-gray-300 flex justify-center">
+                    <h2 className="text-xl font-bold text-black text-center">Product Description</h2>
+                  </div>
+                  
+                  {/* Content Section */}
+                  <div className="p-6 text-gray-700">
+                    <p className="whitespace-pre-line">{product?.description}</p>
+
+                    {/* Read More Button */}
+                    <button className="mt-4 text-blue-600 flex items-center">
+                      ➕ Read more
+                    </button>
+                  </div>
+                </div>
+              )}
+
 
             <div className="bg-white rounded-xl border border-gray-200 p-6">
               <div className="flex items-center gap-2 mb-4">

@@ -20,85 +20,32 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
-// Generate 20 products for demonstration
-const generateProducts = () => {
-  const baseProducts = [
-    {
-      name: "Acupressure Reflexology Chart Socks",
-      image: "https://i.postimg.cc/j2s21Z6r/w3ame3fm-NY79-Zb3-Rp-Ce-Johx-X0298-No-DKnk-T1so-DY.jpg",
-      stats: {
-        profit: "+156%",
-        engagement: "High",
-        fbAds: "Active",
-        targetingInfo: "Available",
-        retailPrice: "$29.99"
-      }
-    },
-    {
-      name: "Teeth Whitening Powder",
-      image: "https://i.postimg.cc/jdxn3dvJ/g-LNIZ90-Muiv-Qh-P34kt-ENf25-Lgb-L17u-Ih4og7-SF1q.webp",
-      stats: {
-        profit: "+142%",
-        engagement: "Medium",
-        fbAds: "Active",
-        targetingInfo: "Available",
-        retailPrice: "$39.99"
-      }
-    },
-    {
-      name: "Rechargeable Automatic Dog Paw Cleaner",
-      image: "https://i.postimg.cc/QtZHQXHC/ASWBR0od5-FT0-Gt-KSt-CAsto-Ruezkhp-Urt-NKBa6-CBK.webp",
-      stats: {
-        profit: "+98%",
-        engagement: "High",
-        fbAds: "Active",
-        targetingInfo: "Available",
-        retailPrice: "$24.99"
-      }
-    },
-    {
-      name: "Baby Hair Clipper with Vacuum",
-      image: "https://i.postimg.cc/BZD8N7Fk/Wuaw43-J4j-Mu1x-Dehzoo8d-UUHTnke-Kcnrm-GMzs-DCj.webp",
-      stats: {
-        profit: "+134%",
-        engagement: "High",
-        fbAds: "Active",
-        targetingInfo: "Available",
-        retailPrice: "$19.99"
-      }
-    }
-  ];
-
-  return Array.from({ length: 20 }, (_, index) => {
-    const baseProduct = baseProducts[index % baseProducts.length];
-    const daysAgo = Math.floor(Math.random() * 7) + 1;
-    return {
-      id: index + 1,
-      name: baseProduct.name,
-      image: baseProduct.image,
-      posted: `${daysAgo} days ago`,
-      stats: baseProduct.stats,
-      isLocked: index < 4, // Only first 4 products are locked
-      isSaved: false
-    };
-  });
-};
-
-// const products = generateProducts();
-const PRODUCTS_PER_PAGE = 20;
-const TOTAL_PAGES = 14; // For demonstration, showing 277 total products
-
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [showSaved, setShowSaved] = useState(false);
-  const [dateRange, setDateRange] = useState('all');
-  const [showFilters, setShowFilters] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [savedProducts, setSavedProducts] = useState<Set<number>>(new Set());
-  const [searchQuery, setSearchQuery] = useState('');
-  const [products,setProducts] =useState([])
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [newProduct, setNewProduct] = useState({
+    name: '',
+    description: '',
+    selling_price: '',
+    product_cost: '',
+    is_locked: false,
+    images: [],
+    category_id: '', // New field for category
+    profit_margin: 0,  // Default value for profit margin
+    release_time: '', // Default or empty
+    priority: 0, // Default value for priority
+    is_top_product: false,  // Default value for is_top_product
+    search_volume: '{"trend": "stable", "monthly": 0, "relatedTerms": []}', // Default JSON
+    aliexpress_orders: '{"daily": 0, "trend": "stable", "weekly": 0, "monthly": 0}', // Default JSON
+    engagement_metrics: '{"fbAds": "inactive", "level": "medium", "targetingInfo": "unavailable"}', // Default JSON
+    saturation_data: '{"timeFrame": "30 days", "percentage": 0, "competition": "low", "totalStores": 0, "activeStores": 0, "recentChange": "0%"}' // Default JSON
+  });
+  const [selectedImage, setSelectedImage] = useState(null); // New state for image upload
 
   useEffect(() => {
+    // Fetch products from Supabase
     const fetchProducts = async () => {
       const { data, error } = await supabase.from("products").select("*");
       if (error) {
@@ -107,62 +54,93 @@ const Dashboard = () => {
         setProducts(data);
       }
     };
+
+    // Fetch categories from Supabase
+    const fetchCategories = async () => {
+      const { data, error } = await supabase.from("categories").select("*");
+      if (error) {
+        console.error("Error fetching categories:", error);
+      } else {
+        setCategories(data);
+      }
+    };
+
     fetchProducts();
+    fetchCategories();
   }, []);
 
+  const handleAddProduct = async (e) => {
+    e.preventDefault();
+    const { name, description, selling_price, product_cost, is_locked, category_id, profit_margin, release_time, priority, is_top_product, search_volume, aliexpress_orders, engagement_metrics, saturation_data } = newProduct;
 
-  const toggleSaveProduct = (productId: number) => {
-    setSavedProducts(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(productId)) {
-        newSet.delete(productId);
-      } else {
-        newSet.add(productId);
+    let imageUrl = '';
+    if (selectedImage) {
+      // Upload image to Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('product-images')
+        .upload(`product_images/${selectedImage.name}`, selectedImage);
+
+      if (error) {
+        console.error('Error uploading image:', error);
+        return;
       }
-      return newSet;
-    });
-  };
-
-  const handleShowMeMoney = (productId: number) => {
-    navigate(`/product/${productId}`);
-  };
-
-  const getPaginationRange = () => {
-    const range = [];
-    const showPages = 5;
-    const leftOffset = Math.floor(showPages / 2);
-    
-    let start = currentPage - leftOffset;
-    let end = currentPage + leftOffset;
-
-    if (start < 1) {
-      end += (1 - start);
-      start = 1;
+      imageUrl = data?.path; // Get the image URL from Supabase Storage
     }
 
-    if (end > TOTAL_PAGES) {
-      start -= (end - TOTAL_PAGES);
-      end = TOTAL_PAGES;
+    try {
+      // Insert the new product into Supabase
+      const { data, error } = await supabase
+        .from("products")
+        .insert([{
+          name,
+          description,
+          selling_price,
+          product_cost,
+          is_locked,
+          category_id,
+          images: [imageUrl], // Save image URL in the 'images' field
+          profit_margin: profit_margin || (selling_price - product_cost), // Default profit margin calculation
+          release_time,
+          priority,
+          is_top_product,
+          search_volume: JSON.parse(search_volume), // Ensure it's stored as JSON
+          aliexpress_orders: JSON.parse(aliexpress_orders),
+          engagement_metrics: JSON.parse(engagement_metrics),
+          saturation_data: JSON.parse(saturation_data),
+          created_at: new Date(),  // Automatically set created_at
+          updated_at: new Date(),  // Automatically set updated_at
+        }]);
+
+      if (error) throw error;
+
+      // Update products state with the new product
+      setProducts((prevProducts) => [...prevProducts, ...data]);
+
+      // Close the modal after adding the product
+      setShowAddProductModal(false); // This will close the modal
+
+      // Reset the form fields and selected image
+      setNewProduct({
+        name: '',
+        description: '',
+        selling_price: '',
+        product_cost: '',
+        is_locked: false,
+        images: [],
+        category_id: '',
+        profit_margin: 0,
+        release_time: '',
+        priority: 0,
+        is_top_product: false,
+        search_volume: '{"trend": "stable", "monthly": 0, "relatedTerms": []}',
+        aliexpress_orders: '{"daily": 0, "trend": "stable", "weekly": 0, "monthly": 0}',
+        engagement_metrics: '{"fbAds": "inactive", "level": "medium", "targetingInfo": "unavailable"}',
+        saturation_data: '{"timeFrame": "30 days", "percentage": 0, "competition": "low", "totalStores": 0, "activeStores": 0, "recentChange": "0%"}',
+      });
+      setSelectedImage(null); // Clear selected image
+    } catch (error) {
+      console.error("Error adding product:", error);
     }
-
-    start = Math.max(start, 1);
-    end = Math.min(end, TOTAL_PAGES);
-
-    if (start > 1) {
-      range.push(1);
-      if (start > 2) range.push('...');
-    }
-
-    for (let i = start; i <= end; i++) {
-      range.push(i);
-    }
-
-    if (end < TOTAL_PAGES) {
-      if (end < TOTAL_PAGES - 1) range.push('...');
-      range.push(TOTAL_PAGES);
-    }
-
-    return range;
   };
 
   return (
@@ -173,102 +151,137 @@ const Dashboard = () => {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">AI-Curated Winning Products, Updated Every Day</h1>
         </div>
 
-        {/* Search Bar */}
-        <div className="relative">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="text"
-              placeholder="Search for products, niches, categories..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-10 py-3 rounded-xl border border-gray-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X size={20} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Mobile Filters Toggle */}
-        <button 
-          className="md:hidden flex items-center justify-between w-full px-4 py-2 bg-white border rounded-lg"
-          onClick={() => setShowFilters(!showFilters)}
-        >
-          <span className="text-gray-700 font-medium">Filters</span>
-          <ChevronDown size={20} className={`text-gray-500 transform transition-transform ${showFilters ? 'rotate-180' : ''}`} />
-        </button>
-
-        {/* Filters */}
-        <div className={`
-          flex flex-col gap-3
-          md:flex md:flex-row md:items-center md:justify-between
-          ${showFilters ? 'block' : 'hidden md:flex'}
-        `}>
-          {/* Left Side - My Saved */}
-          <button 
-            onClick={() => setShowSaved(!showSaved)}
-            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors w-full md:w-auto ${
-              showSaved 
-                ? 'bg-secondary text-white' 
-                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-            }`}
+        {/* Add Product Button */}
+        <div className="text-center">
+          <button
+            onClick={() => setShowAddProductModal(true)}
+            className="px-4 py-2 bg-primary text-white rounded-lg shadow-md"
           >
-            <BookmarkCheck size={18} />
-            <span className="whitespace-nowrap">My Saved</span>
+            Add New Product
           </button>
-
-          {/* Right Side - Filters */}
-          <div className="flex flex-col md:flex-row gap-3">
-            <select className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium">
-              <option>Sort by: New</option>
-              <option>Sort by: Trending</option>
-              <option>Sort by: Profit</option>
-            </select>
-
-            <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-4 py-2">
-              <Calendar size={18} className="text-gray-500 shrink-0" />
-              <select 
-                className="w-full bg-transparent border-none text-sm font-medium focus:outline-none"
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value)}
-              >
-                <option value="all">All Time</option>
-                <option value="today">Today</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="quarter">Last 3 Months</option>
-              </select>
-            </div>
-            
-            <select className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium">
-              <option>All Categories</option>
-              <option>Home & Garden</option>
-              <option>Electronics</option>
-              <option>Pet Supplies</option>
-            </select>
-          </div>
         </div>
+
+        {/* Modal for Adding Product */}
+        {showAddProductModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+            <div className="bg-white p-8 rounded-lg shadow-lg w-1/3 max-h-[90vh] overflow-y-auto">
+              <h2 className="text-xl font-semibold mb-4">Add New Product</h2>
+              <form onSubmit={handleAddProduct}>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Product Name</label>
+                  <input
+                    type="text"
+                    value={newProduct.name}
+                    onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                    className="mt-2 block w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    required
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Description</label>
+                  <textarea
+                    value={newProduct.description}
+                    onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
+                    className="mt-2 block w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    required
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Selling Price</label>
+                  <input
+                    type="number"
+                    value={newProduct.selling_price}
+                    onChange={(e) => setNewProduct({ ...newProduct, selling_price: e.target.value })}
+                    className="mt-2 block w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    required
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Product Cost</label>
+                  <input
+                    type="number"
+                    value={newProduct.product_cost}
+                    onChange={(e) => setNewProduct({ ...newProduct, product_cost: e.target.value })}
+                    className="mt-2 block w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    required
+                  />
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Is Locked?</label>
+                  <input
+                    type="checkbox"
+                    checked={newProduct.is_locked}
+                    onChange={(e) => setNewProduct({ ...newProduct, is_locked: e.target.checked })}
+                    className="mt-2"
+                  />
+                </div>
+
+                {/* Category Dropdown */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Category</label>
+                  <select
+                    value={newProduct.category_id}
+                    onChange={(e) => setNewProduct({ ...newProduct, category_id: e.target.value })}
+                    className="mt-2 block w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    required
+                  >
+                    <option value="">Select Category</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Image Upload */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Product Image</label>
+                  <input
+                    type="file"
+                    onChange={(e) => setSelectedImage(e.target.files[0])}
+                    className="mt-2 block w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+
+                <div className="flex justify-between items-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddProductModal(false)}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-primary text-white rounded-lg"
+                  >
+                    Add Product
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Products Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {products.map((product:any) => (
+        {products.map((product) => (
           <div key={product.id} className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200 hover:shadow-md transition-shadow duration-200">
             <div className="flex h-[180px]">
               {/* Product Image */}
               <div className="relative w-[180px] shrink-0">
                 <img 
-                  src={product.images ? product.images[0] : '/'} 
+                  src={product.images[0] || '/placeholder-image.jpg'} 
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />
-                {product.isLocked && (
+                {product.is_locked && (
                   <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center">
                     <Lock size={24} className="text-white" />
                   </div>
@@ -283,77 +296,9 @@ const Dashboard = () => {
                     <p className="text-xs text-gray-500">Posted {product.posted}</p>
                   </div>
                 </div>
-
-                {/* Stats Grid */}
-                <div className="grid grid-cols-4 gap-1.5">
-                  {[
-                    { icon: DollarSign, label: 'PROFITS', color: 'text-green-600' },
-                    { icon: BarChart2, label: 'ANALYTICS', color: 'text-orange-500' },
-                    { icon: MessageSquare, label: 'ENGAGEMENT', color: 'text-blue-500' },
-                    { icon: Link, label: 'LINKS', color: 'text-purple-500' },
-                    { icon: Facebook, label: 'FB ADS', color: 'text-blue-600' },
-                    { icon: Play, label: 'VIDEO', color: 'text-red-500' },
-                    { icon: Target, label: 'TARGETING', color: 'text-indigo-500' },
-                    { icon: Tag, label: 'RETAIL PRICE', color: 'text-yellow-600' }
-                  ].map((stat, index) => (
-                    <div key={index} className="flex flex-col items-center justify-center p-2 bg-gray-50/80 rounded hover:bg-gray-100/80 transition-colors h-[46px]">
-                      <stat.icon size={20} className={`${stat.color} md:mb-1`} />
-                      <span className="text-[8px] text-gray-600 font-semibold leading-none text-center uppercase tracking-wider hidden md:block">{stat.label}</span>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 p-4">
-              <button 
-                onClick={() => handleShowMeMoney(product.id)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  product.isLocked
-                    ? 'bg-primary hover:bg-primary/90 text-white shadow-sm hover:shadow'
-                    : 'bg-secondary hover:bg-secondary/90 text-white shadow-sm hover:shadow'
-                }`}
-              >
-                {product.isLocked ? 'Unlock Now' : 'Show Me The Money!'}
-              </button>
-              
-              <button 
-                onClick={() => toggleSaveProduct(product.id)}
-                className={`px-3 rounded-lg transition-all duration-200 ${
-                  savedProducts.has(product.id)
-                    ? 'bg-secondary/10 text-secondary hover:bg-secondary/20'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                <Bookmark 
-                  size={18} 
-                  className={savedProducts.has(product.id) ? 'fill-secondary' : ''} 
-                />
-              </button>
-            </div>
           </div>
-        ))}
-      </div>
-
-      {/* Pagination */}
-      <div className="flex justify-center mt-8 gap-2 overflow-x-auto">
-        {getPaginationRange().map((page, index) => (
-          page === '...' ? (
-            <span key={`ellipsis-${index}`} className="px-4 py-2 text-gray-600">...</span>
-          ) : (
-            <button
-              key={page}
-              onClick={() => setCurrentPage(Number(page))}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                currentPage === page
-                  ? 'bg-primary text-white'
-                  : 'bg-white text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {page}
-            </button>
-          )
         ))}
       </div>
     </div>

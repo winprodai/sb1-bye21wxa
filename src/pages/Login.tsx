@@ -285,7 +285,7 @@ const Login = () => {
                   </div>
                 </div>
 
-                <div className="mt-6 grid grid-cols-2 gap-3">
+                <div className="mt-6 grid grid-cols-1 gap-3">
                   <button
                     type="button"
                     onClick={() => handleSocialSignIn('google')}
@@ -298,7 +298,7 @@ const Login = () => {
                     />
                     Google
                   </button>
-                  <button
+                  {/* <button
                     type="button"
                     onClick={() => handleSocialSignIn('facebook')}
                     className="w-full inline-flex justify-center py-2 px-4 border border-white/20 rounded-lg shadow-sm bg-white/5 text-sm font-medium text-white hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary focus:ring-offset-black"
@@ -311,7 +311,7 @@ const Login = () => {
                       <path d="M12 0C5.383 0 0 5.383 0 12s5.383 12 12 12 12-5.383 12-12S18.617 0 12 0zm3.283 8.25h-1.5c-.567 0-.666.24-.666.85v1.15h2.166l-.283 2.25h-1.883V19h-2.75v-6.5H8.5v-2.25h1.867V8.5C10.367 6.5 11.35 5 13.5 5h1.783v3.25z" />
                     </svg>
                     Facebook
-                  </button>
+                  </button> */}
                 </div>
               </div>
 

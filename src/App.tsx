@@ -1,40 +1,38 @@
-import React, { useEffect, useState } from "react";
-import {
-  BrowserRouter as Router,
-  Routes,
-  Route,
-  Navigate,
-  useNavigate,
-} from "react-router-dom";
-import { AuthProvider } from "./contexts/AuthContext";
-import Sidebar from "./components/Sidebar";
-import AdminLayout from "./components/AdminLayout";
-import Dashboard from "./pages/Dashboard";
-import Ebooks from "./pages/Ebooks";
-import Support from "./pages/Support";
-import FAQ from "./pages/FAQ";
-import Privacy from "./pages/Privacy";
-import Terms from "./pages/Terms";
-import Register from "./pages/Register";
-import Login from "./pages/Login";
-import Account from "./pages/Account";
-import Pricing from "./pages/Pricing";
-import ProductDetails from "./pages/ProductDetails";
-import SavedProducts from "./pages/SavedProducts";
-import Home from "./pages/Home";
-import Footer from "./components/Footer";
-import AdminDashboard from "./pages/admin/Dashboard";
-import AdminProducts from "./pages/admin/Products";
-import AdminUsers from "./pages/admin/Users";
-import AdminCustomers from "./pages/admin/Customers";
-import AdminLogin from "./pages/admin/Login";
-import AuthCallback from "./pages/auth/Callback";
-import Header from "./components/Header";
-import { supabase } from "./lib/supabase";
-import NotFound from "./pages/NotFound";
-import AuthLoader from "./components/AuthLoader";
-import AdminRegister from "./pages/admin/Register";
-import { checkIsAdmin } from "./lib/utils";
+"use client"
+
+import type React from "react"
+import { useEffect, useState } from "react"
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom"
+import { AuthProvider } from "./contexts/AuthContext"
+import Sidebar from "./components/Sidebar"
+import AdminLayout from "./components/AdminLayout"
+import Dashboard from "./pages/Dashboard"
+import Ebooks from "./pages/Ebooks"
+import Support from "./pages/Support"
+import FAQ from "./pages/FAQ"
+import Privacy from "./pages/Privacy"
+import Terms from "./pages/Terms"
+import Register from "./pages/Register"
+import Login from "./pages/Login"
+import Account from "./pages/Account"
+import Pricing from "./pages/Pricing"
+import ProductDetails from "./pages/ProductDetails"
+import SavedProducts from "./pages/SavedProducts"
+import Home from "./pages/Home"
+import Footer from "./components/Footer"
+import AdminDashboard from "./pages/admin/Dashboard"
+import AdminProducts from "./pages/admin/Products"
+import AdminUsers from "./pages/admin/Users"
+import AdminCustomers from "./pages/admin/Customers"
+import AdminAddons from "./pages/admin/Addons"
+import AdminLogin from "./pages/admin/Login"
+import AuthCallback from "./pages/auth/Callback"
+import Header from "./components/Header"
+import { supabase } from "./lib/supabase"
+import NotFound from "./pages/NotFound"
+import AuthLoader from "./components/AuthLoader"
+import AdminRegister from "./pages/admin/Register"
+import { checkIsAdmin } from "./lib/utils"
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   useEffect((): any => {
@@ -42,109 +40,107 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       const {
         data: { user },
         error,
-      } = await supabase.auth.getUser();
+      } = await supabase.auth.getUser()
 
       if (!user) {
-        return <Navigate to="/login" replace />;
+        return <Navigate to="/login" replace />
       }
 
       if (error) {
-        console.error("Error fetching user:", error);
+        console.error("Error fetching user:", error)
       } else {
-        console.log("User:", user);
+        console.log("User:", user)
       }
     }
 
-    fetchUser();
-  }, []);
+    fetchUser()
+  }, [])
 
-  return <>{children}</>;
+  return <>{children}</>
 }
 
 function ProtectedAdminRoute({ children }: { children: React.ReactNode }) {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const navigate = useNavigate();
-  const [authLoader, setAuthLoader] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false)
+  const navigate = useNavigate()
+  const [authLoader, setAuthLoader] = useState(true)
   useEffect(() => {
     const checkInitial = async () => {
       try {
-        setAuthLoader(true); 
+        setAuthLoader(true)
 
         const {
           data: { session },
-        } = await supabase.auth.getSession();
+        } = await supabase.auth.getSession()
 
         if (!session?.user) {
-          setAuthLoader(false);
-          return;
+          setAuthLoader(false)
+          return
         }
 
-        const sessionUserId = session.user.id;
+        const sessionUserId = session.user.id
 
-        const isAdmin = await checkIsAdmin(sessionUserId);
+        const isAdmin = await checkIsAdmin(sessionUserId)
 
         if (isAdmin) {
-          setIsAdmin(true);
+          setIsAdmin(true)
         } else {
-          setIsAdmin(false);
+          setIsAdmin(false)
         }
       } catch (error) {
-        console.error("Error checking admin status:", error);
+        console.error("Error checking admin status:", error)
       } finally {
-        setAuthLoader(false);
+        setAuthLoader(false)
       }
-    };
+    }
 
-    checkInitial();
-  }, []);
+    checkInitial()
+  }, [])
 
   if (authLoader) {
-    return <AuthLoader />;
+    return <AuthLoader />
   } else if (!isAdmin) {
-    return <Navigate to="/admin/login" replace />;
+    return <Navigate to="/admin/login" replace />
   }
 
-  return <>{children}</>;
+  return <>{children}</>
 }
 
 function App() {
-  const [isLogin, setIsLogin] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isLogin, setIsLogin] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
 
   const toggleSidebar = () => {
-    setSidebarOpen(!sidebarOpen);
-  };
+    setSidebarOpen(!sidebarOpen)
+  }
 
   useEffect(() => {
     const fetchUser = async () => {
-      setIsCheckingAuth(true);
+      setIsCheckingAuth(true)
       const {
         data: { user },
         error,
-      } = await supabase.auth.getUser();
+      } = await supabase.auth.getUser()
 
       if (!user) {
-        setIsLogin(false);
+        setIsLogin(false)
       } else {
-        setIsLogin(true);
+        setIsLogin(true)
       }
-      setIsCheckingAuth(false);
-    };
-    fetchUser();
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setIsLogin(!!session?.user);
-      }
-    );
+      setIsCheckingAuth(false)
+    }
+    fetchUser()
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsLogin(!!session?.user)
+    })
 
     return () => {
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
 
   if (isCheckingAuth) {
-    return <AuthLoader />;
+    return <AuthLoader />
   }
 
   if (!isLogin) {
@@ -163,7 +159,7 @@ function App() {
           </Routes>
         </Router>
       </AuthProvider>
-    );
+    )
   }
 
   return (
@@ -193,6 +189,16 @@ function App() {
                 <ProtectedAdminRoute>
                   <AdminLayout>
                     <AdminProducts />
+                  </AdminLayout>
+                </ProtectedAdminRoute>
+              }
+            />
+            <Route
+              path="addons"
+              element={
+                <ProtectedAdminRoute>
+                  <AdminLayout>
+                    <AdminAddons />
                   </AdminLayout>
                 </ProtectedAdminRoute>
               }
@@ -357,7 +363,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-         
+
           <Route
             path="/ebooks"
             element={
@@ -404,7 +410,8 @@ function App() {
         </Routes>
       </Router>
     </AuthProvider>
-  );
+  )
 }
 
-export default App;
+export default App
+

@@ -313,6 +313,112 @@ const toggleLockAPI = async (product: Product): Promise<ProductWithCategories | 
   }
 }
 
+/**
+ * Create a default "Profit & Cost" addon for a product.
+ * @param product - The product to create the addon for.
+ */
+const createDefaultProfitCostAddon = async (product: ProductWithCategories) => {
+  try {
+    // Create default content for the profit_cost addon
+    const defaultContent = {
+      show_selling_price: true,
+      show_product_cost: true,
+      show_profit_margin: true,
+      selling_price: product.selling_price,
+      product_cost: product.product_cost,
+      profit_margin: (product.selling_price - product.product_cost).toFixed(2),
+      custom_text: "",
+    }
+
+    // Check if this product already has a profit_cost addon
+    const { data: existingAddons, error: checkError } = await supabase
+      .from("product_addons")
+      .select("*")
+      .eq("product_id", product.id)
+      .eq("type", "profit_cost")
+
+    if (checkError) throw checkError
+
+    // Only create if no existing addon of this type for this product
+    if (!existingAddons || existingAddons.length === 0) {
+      const addonData = {
+        type: "profit_cost",
+        title: "Your Profit & Cost",
+        content: JSON.stringify(defaultContent, null, 2),
+        enabled: true,
+        order: 1,
+        product_id: product.id,
+        created_at: new Date(),
+        updated_at: new Date(),
+      }
+
+      const { error } = await supabase.from("product_addons").insert([addonData])
+      if (error) throw error
+      console.log("Created default profit_cost addon for product:", product.id)
+    }
+  } catch (error) {
+    console.error("Error creating default profit_cost addon:", error)
+    // Don't block product creation if addon creation fails
+  }
+}
+
+/**
+ * Update the "Profit & Cost" addon for a product when the product is updated.
+ * @param product - The updated product.
+ */
+const updateProductProfitCostAddon = async (product: ProductWithCategories) => {
+  try {
+    // Find existing profit_cost addon for this product
+    const { data: existingAddons, error: checkError } = await supabase
+      .from("product_addons")
+      .select("*")
+      .eq("product_id", product.id)
+      .eq("type", "profit_cost")
+
+    if (checkError) throw checkError
+
+    if (existingAddons && existingAddons.length > 0) {
+      // Update existing addon
+      const existingAddon = existingAddons[0]
+      let contentObj = {}
+
+      try {
+        contentObj = JSON.parse(existingAddon.content)
+      } catch (e) {
+        // If parsing fails, create new content object
+        contentObj = {
+          show_selling_price: true,
+          show_product_cost: true,
+          show_profit_margin: true,
+          custom_text: "",
+        }
+      }
+
+      // Update the price values
+      contentObj.selling_price = product.selling_price
+      contentObj.product_cost = product.product_cost
+      contentObj.profit_margin = (product.selling_price - product.product_cost).toFixed(2)
+
+      const { error } = await supabase
+        .from("product_addons")
+        .update({
+          content: JSON.stringify(contentObj, null, 2),
+          updated_at: new Date(),
+        })
+        .eq("id", existingAddon.id)
+
+      if (error) throw error
+      console.log("Updated profit_cost addon for product:", product.id)
+    } else {
+      // Create new addon if it doesn't exist
+      await createDefaultProfitCostAddon(product)
+    }
+  } catch (error) {
+    console.error("Error updating profit_cost addon:", error)
+    // Don't block product update if addon update fails
+  }
+}
+
 // Update the convertFormDataToProductData function to exclude category_ids
 const convertFormDataToProductData = (formData: ProductFormData): Partial<Product> => {
   // Calculate profit margin
@@ -497,6 +603,9 @@ const AdminProducts: React.FC = () => {
 
     const newProduct = await createProductAPI(productData, categoryIds)
     if (newProduct) {
+      // Create a default "Profit & Cost" addon for this product
+      await createDefaultProfitCostAddon(newProduct)
+
       setProducts([newProduct, ...products])
       resetFormData()
       setShowAddModal(false)
@@ -519,6 +628,10 @@ const AdminProducts: React.FC = () => {
     const updated = await updateProductAPI(editingProduct.id, productData, categoryIds)
     if (updated) {
       console.log("Product updated successfully:", updated)
+
+      // Update the profit_cost addon for this product
+      await updateProductProfitCostAddon(updated)
+
       setProducts(products.map((p) => (p.id === editingProduct.id ? updated : p)))
       resetFormData()
       setShowEditModal(false)
@@ -600,6 +713,28 @@ const AdminProducts: React.FC = () => {
   }, [isEditing, editingProduct])
 
   const ProductModal = ({ isEdit = false }: { isEdit?: boolean }) => {
+    // Create local state for the form to avoid state update issues
+    const [localFormData, setLocalFormData] = useState<ProductFormData>(() => ({ ...formData }))
+
+    // Update local form when the parent formData changes (for edit mode)
+    useEffect(() => {
+      setLocalFormData({ ...formData })
+    }, [formData])
+
+    // Handle form submission
+    const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault()
+      // Update the parent formData with our local version
+      setFormData(localFormData)
+
+      // Then submit the form
+      if (isEdit) {
+        handleEditProduct(e)
+      } else {
+        handleAddProduct(e)
+      }
+    }
+
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         <div className="bg-white rounded-xl p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -615,7 +750,7 @@ const AdminProducts: React.FC = () => {
               <X size={20} className="text-gray-500" />
             </button>
           </div>
-          <form onSubmit={isEdit ? handleEditProduct : handleAddProduct} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
             {/* Basic Information */}
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="text-lg font-medium mb-4">Basic Information</h3>
@@ -623,15 +758,15 @@ const AdminProducts: React.FC = () => {
                 <input
                   type="text"
                   placeholder="Product Name"
-                  value={formData.name || ""}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                  value={localFormData.name || ""}
+                  onChange={(e) => setLocalFormData({ ...localFormData, name: e.target.value })}
                   required
                   className="border p-2 mb-2 w-full"
                 />
                 <textarea
                   placeholder="Product Description"
-                  value={formData.description || ""}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+                  value={localFormData.description || ""}
+                  onChange={(e) => setLocalFormData({ ...localFormData, description: e.target.value })}
                   required
                   className="border p-2 mb-2 w-full"
                 />
@@ -640,11 +775,8 @@ const AdminProducts: React.FC = () => {
                     type="number"
                     step="0.01"
                     placeholder="Selling Price"
-                    value={formData.selling_price}
-                    onChange={(e) => {
-                      const newValue = e.target.value
-                      setFormData((prev: ProductFormData) => ({ ...prev, selling_price: newValue }))
-                    }}
+                    value={localFormData.selling_price}
+                    onChange={(e) => setLocalFormData({ ...localFormData, selling_price: e.target.value })}
                     required
                     className="border p-2 mb-2 w-full"
                   />
@@ -652,11 +784,8 @@ const AdminProducts: React.FC = () => {
                     type="number"
                     step="0.01"
                     placeholder="Product Cost"
-                    value={formData.product_cost}
-                    onChange={(e) => {
-                      const newValue = e.target.value
-                      setFormData((prev: ProductFormData) => ({ ...prev, product_cost: newValue }))
-                    }}
+                    value={localFormData.product_cost}
+                    onChange={(e) => setLocalFormData({ ...localFormData, product_cost: e.target.value })}
                     required
                     className="border p-2 mb-2 w-full"
                   />
@@ -671,18 +800,18 @@ const AdminProducts: React.FC = () => {
                         <input
                           type="checkbox"
                           id={`category-${category.id}`}
-                          checked={formData.category_ids.includes(category.id)}
+                          checked={localFormData.category_ids.includes(category.id)}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setFormData((prev: ProductFormData) => ({
-                                ...prev,
-                                category_ids: [...prev.category_ids, category.id],
-                              }))
+                              setLocalFormData({
+                                ...localFormData,
+                                category_ids: [...localFormData.category_ids, category.id],
+                              })
                             } else {
-                              setFormData((prev: ProductFormData) => ({
-                                ...prev,
-                                category_ids: prev.category_ids.filter((id) => id !== category.id),
-                              }))
+                              setLocalFormData({
+                                ...localFormData,
+                                category_ids: localFormData.category_ids.filter((id) => id !== category.id),
+                              })
                             }
                           }}
                           className="rounded border-gray-300"
@@ -699,22 +828,16 @@ const AdminProducts: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={formData.is_top_product || false}
-                    onChange={(e) => {
-                      const newValue = e.target.checked
-                      setFormData((prev: ProductFormData) => ({ ...prev, is_top_product: newValue }))
-                    }}
+                    checked={localFormData.is_top_product || false}
+                    onChange={(e) => setLocalFormData({ ...localFormData, is_top_product: e.target.checked })}
                   />
                   <label>Top Product</label>
                 </div>
                 <input
                   type="number"
                   placeholder="Priority"
-                  value={formData.priority}
-                  onChange={(e) => {
-                    const newValue = Number(e.target.value)
-                    setFormData((prev: ProductFormData) => ({ ...prev, priority: newValue }))
-                  }}
+                  value={localFormData.priority}
+                  onChange={(e) => setLocalFormData({ ...localFormData, priority: Number(e.target.value) })}
                   className="border p-2 mb-2 w-full"
                 />
               </div>
@@ -727,7 +850,11 @@ const AdminProducts: React.FC = () => {
                   type="file"
                   multiple
                   accept="image/*"
-                  onChange={(e) => e.target.files && handleImageUpload(e.target.files)}
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      handleImageUpload(e.target.files)
+                    }
+                  }}
                   className="hidden"
                   id="images"
                 />
@@ -736,9 +863,9 @@ const AdminProducts: React.FC = () => {
                   <span className="text-sm text-gray-500">Click to upload images</span>
                 </label>
               </div>
-              {formData.images && formData.images.length > 0 && (
+              {localFormData.images && localFormData.images.length > 0 && (
                 <div className="mt-4 grid grid-cols-4 gap-4">
-                  {formData.images.map((url: string, index: number) => (
+                  {localFormData.images.map((url: string, index: number) => (
                     <div key={index} className="relative group">
                       <img
                         src={url || "/placeholder.svg"}
@@ -748,10 +875,10 @@ const AdminProducts: React.FC = () => {
                       <button
                         type="button"
                         onClick={() =>
-                          setFormData((prev: ProductFormData) => ({
-                            ...prev,
-                            images: prev.images.filter((_: any, i: number) => i !== index),
-                          }))
+                          setLocalFormData({
+                            ...localFormData,
+                            images: localFormData.images.filter((_: any, i: number) => i !== index),
+                          })
                         }
                         className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                       >

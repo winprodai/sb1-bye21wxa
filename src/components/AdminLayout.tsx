@@ -28,7 +28,8 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
     { name: 'Products', href: '/admin/products', icon: Package },
     { name: 'Admins & Staff', href: '/admin/users', icon: Users },
-    { name: 'Customer Base', href: '/admin/customers', icon: UserCircle }
+    { name: 'Customer Base', href: '/admin/customers', icon: UserCircle },
+    { name: 'Addons', href: '/admin/Addons', icon: UserCircle }
   ];
 
   return (

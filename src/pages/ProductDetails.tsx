@@ -1,28 +1,22 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useParams } from "react-router-dom"
 import { ShoppingCart, Lock, Bookmark, DollarSign, ShoppingBag, Search, ExternalLink, Play } from "lucide-react"
 import { supabase } from "../lib/supabase"
 
 const ProductDetails = () => {
-  const navigate = useNavigate()
   const { id } = useParams()
   const [isSaved, setIsSaved] = useState(false)
   const isPro = false
   const [product, setProduct] = useState<any>({})
   const [loading, setLoading] = useState(true)
   const [selectedImage, setSelectedImage] = useState(0)
-  const [activeVideo, setActiveVideo] = useState(0)
-  const [currentVideoIndex, setCurrentVideoIndex] = useState(0)
   const [categories, setCategories] = useState<string[]>([])
-  const tiktokVideos = [
-    "https://www.tiktok.com/t/ZT29xucKT/",
-    "https://www.tiktok.com/t/ZT29xucKT/",
-    "https://www.tiktok.com/t/ZT29xucKT/",
-    "https://www.tiktok.com/t/ZT29xucKT/",
-    "https://www.tiktok.com/t/ZT29xucKT/",
-  ]
+  const [addons, setAddons] = useState<any>({})
+  const [addonSettings, setAddonSettings] = useState<any>({})
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
+  const DESCRIPTION_LIMIT = 300 // Show "Read more" if text is longer than 300 characters
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -61,8 +55,80 @@ const ProductDetails = () => {
           // Extract just the category names
           const categoryNames = categoryData.map((cat) => cat.name)
           setCategories(categoryNames)
-          console.log("Categories fetched:", categoryNames)
         }
+      }
+
+      // Fetch addons for this product
+      // First try to get product-specific addons
+      const { data: productSpecificAddons, error: productSpecificError } = await supabase
+        .from("product_addons")
+        .select("*")
+        .eq("enabled", true)
+        .eq("product_id", id)
+        .order("order", { ascending: true })
+
+      if (productSpecificError) {
+        console.error("Error fetching product-specific addons:", productSpecificError.message)
+      }
+
+      // Then get global addons (those with null product_id)
+      const { data: globalAddons, error: globalAddonsError } = await supabase
+        .from("product_addons")
+        .select("*")
+        .eq("enabled", true)
+        .is("product_id", null)
+        .order("order", { ascending: true })
+
+      if (globalAddonsError) {
+        console.error("Error fetching global addons:", globalAddonsError.message)
+      }
+
+      // Combine the addons, with product-specific ones overriding global ones of the same type
+      const addonData = []
+      const addonTypes = new Set()
+
+      // First add product-specific addons
+      if (productSpecificAddons) {
+        productSpecificAddons.forEach((addon) => {
+          addonData.push(addon)
+          addonTypes.add(addon.type)
+        })
+      }
+
+      // Then add global addons that don't conflict with product-specific ones
+      if (globalAddons) {
+        globalAddons.forEach((addon) => {
+          if (!addonTypes.has(addon.type)) {
+            addonData.push(addon)
+          }
+        })
+      }
+
+      if (addonData && addonData.length > 0) {
+        // Group addons by type
+        const groupedAddons = {}
+        const settings = {}
+
+        addonData.forEach((addon) => {
+          if (!groupedAddons[addon.type]) {
+            groupedAddons[addon.type] = []
+          }
+          groupedAddons[addon.type].push(addon)
+
+          // Parse content JSON for settings
+          try {
+            if (addon.content) {
+              settings[addon.type] = JSON.parse(addon.content)
+            }
+          } catch (e) {
+            console.error(`Error parsing addon content for ${addon.type}:`, e)
+            // If parsing fails, use an empty object
+            settings[addon.type] = {}
+          }
+        })
+
+        setAddons(groupedAddons)
+        setAddonSettings(settings)
       }
 
       const formattedProduct = {
@@ -103,20 +169,9 @@ const ProductDetails = () => {
     if (id) fetchProduct()
   }, [id])
 
-  const marketplaceLinks = [
-    { platform: "Amazon", url: "https://amazon.com/dp/B0123456789" },
-    { platform: "eBay", url: "https://ebay.com/itm/123456789" },
-    { platform: "Alibaba", url: "https://alibaba.com/product/123456789" },
-    { platform: "AliExpress", url: "https://aliexpress.com/item/123456789" },
-  ]
-  const aliexpressSuppliers = [
-    { name: "Tech Gadgets Supplier", url: "https://aliexpress.com/supplier/123" },
-    { name: "LED Accessories Co.", url: "https://aliexpress.com/supplier/456" },
-    { name: "Smart Bags Factory", url: "https://aliexpress.com/supplier/789" },
-    { name: "Outdoor Gear Direct", url: "https://aliexpress.com/supplier/101" },
-  ]
-  const calculateMonthlyRevenue = (sales: number) => {
-    return (sales * product.profitMargin).toLocaleString("en-US", {
+  const calculateMonthlyRevenue = (sales: number, profitPerSale: number) => {
+    const revenue = sales * profitPerSale
+    return revenue.toLocaleString("en-US", {
       style: "currency",
       currency: "USD",
       maximumFractionDigits: 0,
@@ -127,15 +182,404 @@ const ProductDetails = () => {
     setIsSaved(!isSaved)
   }
 
-  if (loading)
+  // Function to extract TikTok video ID from various URL formats
+  const getTikTokEmbedUrl = (url: string) => {
+    try {
+      // Handle different TikTok URL formats
+      const patterns = [/video\/(\d+)/, /\/v\/(\d+)/, /\/t\/([^/]+)/]
+
+      for (const pattern of patterns) {
+        const match = url.match(pattern)
+        if (match && match[1]) {
+          return `https://www.tiktok.com/embed/${match[1]}`
+        }
+      }
+
+      // If no pattern matches, return the original URL
+      return url
+    } catch (e) {
+      console.error("Error parsing TikTok URL:", e)
+      return url
+    }
+  }
+
+  // Parse video URLs from settings
+  const getVideoUrls = () => {
+    if (addonSettings.viral_videos && addonSettings.viral_videos.video_urls) {
+      return addonSettings.viral_videos.video_urls
+        .split("\n")
+        .filter((url) => url.trim())
+        .slice(0, addonSettings.viral_videos.max_videos || 5)
+    }
+    return [
+      "https://www.tiktok.com/t/ZT29xucKT/",
+      "https://www.tiktok.com/t/ZT29xucKT/",
+      "https://www.tiktok.com/t/ZT29xucKT/",
+    ]
+  }
+
+  // Parse marketplace links from settings
+  const getMarketplaceLinks = () => {
+    if (addonSettings.marketplace_links && addonSettings.marketplace_links.links) {
+      try {
+        return JSON.parse(addonSettings.marketplace_links.links)
+      } catch (e) {
+        console.error("Error parsing marketplace links:", e)
+      }
+    }
+    return [
+      { platform: "Amazon", url: "https://amazon.com/dp/B0123456789" },
+      { platform: "eBay", url: "https://ebay.com/itm/123456789" },
+      { platform: "Alibaba", url: "https://alibaba.com/product/123456789" },
+      { platform: "AliExpress", url: "https://aliexpress.com/item/123456789" },
+    ]
+  }
+
+  // Parse aliexpress suppliers from settings
+  const getAliexpressSuppliers = () => {
+    if (addonSettings.aliexpress_suppliers && addonSettings.aliexpress_suppliers.suppliers) {
+      try {
+        return JSON.parse(addonSettings.aliexpress_suppliers.suppliers)
+      } catch (e) {
+        console.error("Error parsing aliexpress suppliers:", e)
+      }
+    }
+    return [
+      { name: "Tech Gadgets Supplier", url: "https://aliexpress.com/supplier/123" },
+      { name: "LED Accessories Co.", url: "https://aliexpress.com/supplier/456" },
+      { name: "Smart Bags Factory", url: "https://aliexpress.com/supplier/789" },
+      { name: "Outdoor Gear Direct", url: "https://aliexpress.com/supplier/101" },
+    ]
+  }
+
+  // Get related search terms
+  const getRelatedTerms = () => {
+    if (addonSettings.search_volume && addonSettings.search_volume.related_terms) {
+      try {
+        return JSON.parse(addonSettings.search_volume.related_terms)
+      } catch (e) {
+        console.error("Error parsing related terms:", e)
+      }
+    }
+    return product.searchVolume.relatedTerms || []
+  }
+
+  // Format currency for display
+  const formatCurrency = (amount: number) => {
+    return amount.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    })
+  }
+
+  // Render addon section based on type
+  const renderAddonSection = (type: string) => {
+    // If no addons of this type exist, return null
+    if (!addons[type] || addons[type].length === 0) {
+      return null
+    }
+
+    const settings = addonSettings[type] || {}
+    const addon = addons[type][0]
+
+    // Render different addon types
+    switch (type) {
+      case "profit_cost":
+        return (
+          <div className="bg-white rounded-2xl border border-gray-300 shadow-md">
+            <div className="bg-gray-100 w-full rounded-t-2xl py-3 border-b border-gray-300 flex justify-center">
+              <h2 className="text-xl font-bold text-black text-center">{addon.title || "Your Profit & Cost"}</h2>
+            </div>
+            <div className="mt-6 flex justify-center gap-3 p-4 pb-8">
+              {(settings.show_selling_price === undefined || settings.show_selling_price) && (
+                <div className="bg-white border-2 border-gray-300 shadow-md rounded-xl p-3 text-center w-36 h-28 flex flex-col items-center justify-center">
+                  <p className="text-3xl font-extrabold text-black">
+                    ${settings.selling_price || product.sellingPrice}
+                  </p>
+                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Selling Price</p>
+                </div>
+              )}
+              {(settings.show_product_cost === undefined || settings.show_product_cost) && (
+                <div className="bg-white border-2 border-gray-300 shadow-md rounded-xl p-3 text-center w-36 h-28 flex flex-col items-center justify-center">
+                  <p className="text-3xl font-extrabold text-black">${settings.product_cost || product.productCost}</p>
+                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Product Cost</p>
+                </div>
+              )}
+              {(settings.show_profit_margin === undefined || settings.show_profit_margin) && (
+                <div className="bg-white border-2 border-gray-300 shadow-md rounded-xl p-3 text-center w-36 h-28 flex flex-col items-center justify-center">
+                  <p className="text-3xl font-extrabold text-green-600">
+                    $
+                    {(
+                      (settings.selling_price || product.sellingPrice) - (settings.product_cost || product.productCost)
+                    ).toFixed(2)}
+                  </p>
+                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Profit Margin</p>
+                </div>
+              )}
+            </div>
+            {settings.custom_text && <div className="px-6 pb-4 text-center text-gray-600">{settings.custom_text}</div>}
+          </div>
+        )
+
+      case "search_volume":
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Search size={24} className="text-blue-500" />
+              <h2 className="text-lg font-semibold">{addon.title || "Search Volume Analysis"}</h2>
+            </div>
+            {(settings.show_monthly_searches === undefined || settings.show_monthly_searches) && (
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <p className="text-3xl font-bold text-gray-900">
+                    {(settings.monthly_searches || product.searchVolume.monthly).toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-500">Monthly searches</p>
+                </div>
+                {(settings.show_trend === undefined || settings.show_trend) && (
+                  <span
+                    className={`px-3 py-1 text-sm font-medium rounded-full ${
+                      (settings.trend || product.searchVolume.trend) === "increasing"
+                        ? "bg-green-100 text-green-800"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {(settings.trend || product.searchVolume.trend) === "increasing" ? "Trending Up" : "Trending Down"}
+                  </span>
+                )}
+              </div>
+            )}
+            {(settings.show_related_terms === undefined || settings.show_related_terms) && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-gray-700">Related Search Terms</h3>
+                {getRelatedTerms()
+                  .slice(0, settings.max_related_terms || 5)
+                  .map((term, index) => (
+                    <a
+                      key={index}
+                      href={term.url || `https://google.com/search?q=${encodeURIComponent(term.term)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group"
+                    >
+                      <span className="text-gray-700">{term.term}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900">
+                          {term.volume.toLocaleString()} searches/mo
+                        </span>
+                        <ExternalLink size={18} className="text-gray-400 group-hover:text-primary transition-colors" />
+                      </div>
+                    </a>
+                  ))}
+              </div>
+            )}
+          </div>
+        )
+
+      case "monthly_revenue":
+        const profitPerSale = settings.profit_per_sale || product.profitMargin || 0
+        const useCustomRevenue = settings.use_custom_revenue || false
+
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <DollarSign size={24} className="text-green-500" />
+              <h2 className="text-lg font-semibold">{addon.title || "Estimated Monthly Revenue"}</h2>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              {(settings.show_conservative === undefined || settings.show_conservative) && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-sm text-gray-500 mb-1">CONSERVATIVE</p>
+                  <p className="text-xl font-bold text-gray-900">
+                    {useCustomRevenue
+                      ? formatCurrency(settings.conservative_revenue || 0)
+                      : calculateMonthlyRevenue(
+                          settings.conservative_sales || product.estimatedSales.low,
+                          profitPerSale,
+                        )}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {settings.conservative_sales || product.estimatedSales.low} sales/month
+                  </p>
+                </div>
+              )}
+              {(settings.show_realistic === undefined || settings.show_realistic) && (
+                <div
+                  className={`bg-gray-50 rounded-lg p-4 ${
+                    settings.highlight_realistic === undefined || settings.highlight_realistic
+                      ? "border-2 border-green-100"
+                      : ""
+                  }`}
+                >
+                  <p className="text-sm text-gray-500 mb-1">REALISTIC</p>
+                  <p
+                    className={`text-xl font-bold ${
+                      settings.highlight_realistic === undefined || settings.highlight_realistic
+                        ? "text-green-600"
+                        : "text-gray-900"
+                    }`}
+                  >
+                    {useCustomRevenue
+                      ? formatCurrency(settings.realistic_revenue || 0)
+                      : calculateMonthlyRevenue(
+                          settings.realistic_sales || product.estimatedSales.average,
+                          profitPerSale,
+                        )}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {settings.realistic_sales || product.estimatedSales.average} sales/month
+                  </p>
+                </div>
+              )}
+              {(settings.show_optimistic === undefined || settings.show_optimistic) && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-sm text-gray-500 mb-1">OPTIMISTIC</p>
+                  <p className="text-xl font-bold text-gray-900">
+                    {useCustomRevenue
+                      ? formatCurrency(settings.optimistic_revenue || 0)
+                      : calculateMonthlyRevenue(
+                          settings.optimistic_sales || product.estimatedSales.high,
+                          profitPerSale,
+                        )}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {settings.optimistic_sales || product.estimatedSales.high} sales/month
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+
+      case "viral_videos":
+        const videoUrls = getVideoUrls()
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="bg-black rounded-full p-1.5">
+                <Play size={18} className="text-white" />
+              </div>
+              <h2 className="text-lg font-semibold">{addon.title || "Viral Videos"}</h2>
+            </div>
+            <div className="relative">
+              <div className="overflow-hidden">
+                <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-6 px-6">
+                  {videoUrls.map((video, index) => (
+                    <div key={index} className="relative flex-shrink-0 w-[280px] snap-start">
+                      <div className="aspect-[9/10] bg-gray-100 rounded-lg overflow-hidden">
+                        <iframe
+                          src={getTikTokEmbedUrl(video)}
+                          className="w-full h-full"
+                          allowFullScreen
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        />
+                      </div>
+                      {(settings.show_views === undefined || settings.show_views) && (
+                        <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                          {Math.floor(Math.random() * 10) + 1}M views
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+
+      case "marketplace_links":
+        const marketplaceLinks = getMarketplaceLinks()
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <ExternalLink size={24} className="text-blue-500" />
+              <h2 className="text-lg font-semibold">{addon.title || "Marketplace Links"}</h2>
+            </div>
+            <div className="space-y-3">
+              {marketplaceLinks.map((link, index) => (
+                <a
+                  key={index}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group"
+                >
+                  <span className="text-gray-700">{link.platform}</span>
+                  <ExternalLink size={18} className="text-gray-400 group-hover:text-primary transition-colors" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )
+
+      case "aliexpress_suppliers":
+        const suppliers = getAliexpressSuppliers()
+        return (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center gap-2 mb-6">
+              <ShoppingBag size={24} className="text-[#FF4646]" />
+              <h2 className="text-lg font-semibold">{addon.title || "Aliexpress Suppliers"}</h2>
+            </div>
+            <div className="space-y-3">
+              {suppliers.map((supplier, index) => (
+                <a
+                  key={index}
+                  href={supplier.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group"
+                >
+                  <span className="text-gray-700">{supplier.name}</span>
+                  <ExternalLink size={18} className="text-gray-400 group-hover:text-[#FF4646] transition-colors" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )
+
+      case "action_buttons":
+        return (
+          <div className="flex gap-4 mt-4">
+            {(settings.show_aliexpress_button === undefined || settings.show_aliexpress_button) && (
+              <a
+                href={settings.aliexpress_button_url || "https://aliexpress.com"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-[#FF4646] hover:bg-[#FF4646]/90 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+              >
+                {settings.aliexpress_button_text || "See on Aliexpress"}
+              </a>
+            )}
+            {(settings.show_shopify_button === undefined || settings.show_shopify_button) && (
+              <a
+                href={settings.shopify_button_url || "https://shopify.com"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-[#96BF48] hover:bg-[#96BF48]/90 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+              >
+                <ShoppingCart size={18} />
+                {settings.shopify_button_text || "Sell with Shopify"}
+              </a>
+            )}
+          </div>
+        )
+
+      default:
+        return null
+    }
+  }
+
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-primary"></div>{" "}
+          <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-primary"></div>
           <p className="mt-3 text-lg font-semibold text-gray-700">Loading Product...</p>
         </div>
       </div>
     )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 mt-[40px] sm:mt-[40px] lg:mt-0">
@@ -188,34 +632,9 @@ const ProductDetails = () => {
                 </button>
               ))}
             </div>
-            {/* Viral Videos Section */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6">
-              <div className="flex items-center gap-2 mb-6">
-                <div className="bg-black rounded-full p-1.5">
-                  <Play size={18} className="text-white" />
-                </div>
-                <h2 className="text-lg font-semibold">Viral Videos</h2>
-              </div>
 
-              <div className="relative">
-                <div className="overflow-hidden">
-                  <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-6 px-6">
-                    {tiktokVideos.map((video, index) => (
-                      <div key={index} className="relative flex-shrink-0 w-[280px] snap-start">
-                        <div className="aspect-[9/16] bg-gray-100 rounded-lg overflow-hidden">
-                          <iframe
-                            src={`https://www.tiktok.com/embed/${video.split("/t/")[1].split("/")[0]}`}
-                            className="w-full h-full"
-                            allowFullScreen
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* Render Viral Videos addon if enabled */}
+            {renderAddonSection("viral_videos")}
           </div>
 
           <div className="space-y-6 sm:space-y-6 md:space-y-8 lg:space-y-8">
@@ -247,133 +666,43 @@ const ProductDetails = () => {
                 )}
               </div>
 
-
-              <div className="hidden sm:flex gap-4 mt-4">
-                <button className="bg-[#FF4646] hover:bg-[#FF4646]/90 text-white px-4 py-2 rounded-lg font-medium transition-colors">
-                  See on Aliexpress
-                </button>
-                <button className="bg-[#96BF48] hover:bg-[#96BF48]/90 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2">
-                  <ShoppingCart size={18} />
-                  Sell with Shopify
-                </button>
-              </div>
-
-             
+              {/* Render Action Buttons addon if enabled */}
+              {renderAddonSection("action_buttons")}
             </div>
 
-            <div className="bg-white rounded-2xl border border-gray-300 shadow-md">
-              {/* Header Section */}
-              <div className="bg-gray-100 w-full rounded-t-2xl py-3 border-b border-gray-300 flex justify-center">
-                <h2 className="text-xl font-bold text-black text-center">Your Profit & Cost</h2>
-              </div>
+            {/* Render Profit & Cost addon if enabled */}
+            {renderAddonSection("profit_cost")}
 
-              {/* Square Boxes & Reduced Gap */}
-              <div className="mt-6 flex justify-center gap-3 p-4 pb-8">
-                {/* Selling Price */}
-                <div className="bg-white border-2 border-gray-300 shadow-md rounded-xl p-3 text-center w-36 h-28 flex flex-col items-center justify-center">
-                  <p className="text-3xl font-extrabold text-black">$12.61</p>
-                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Selling Price</p>
+            {/* Product Description Section */}
+            {product?.description && (
+              <div className="bg-white rounded-2xl border border-gray-300 shadow-md mt-6">
+                <div className="bg-gray-100 w-full rounded-t-2xl py-3 border-b border-gray-300 flex justify-center">
+                  <h2 className="text-xl font-bold text-black text-center">Product Description</h2>
                 </div>
-
-                {/* Product Cost */}
-                <div className="bg-white border-2 border-gray-300 shadow-md rounded-xl p-3 text-center w-36 h-28 flex flex-col items-center justify-center">
-                  <p className="text-3xl font-extrabold text-black">$2.61</p>
-                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Product Cost</p>
-                </div>
-
-                {/* Profit Margin */}
-                <div className="bg-white border-2 border-gray-300 shadow-md rounded-xl p-3 text-center w-36 h-28 flex flex-col items-center justify-center">
-                  <p className="text-3xl font-extrabold text-green-600">$10</p>
-                  <p className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Profit Margin</p>
-                </div>
-              </div>
-            </div>
-
-               {/* Product Description Section */}
-               {product?.description && (
-                <div className="bg-white rounded-2xl border border-gray-300 shadow-md mt-6">
-                  
-                  {/* Header Section (Styled same as "Your Profit & Cost") */}
-                  <div className="bg-gray-100 w-full rounded-t-2xl py-3 border-b border-gray-300 flex justify-center">
-                    <h2 className="text-xl font-bold text-black text-center">Product Description</h2>
-                  </div>
-                  
-                  {/* Content Section */}
-                  <div className="p-6 text-gray-700">
-                    <p className="whitespace-pre-line">{product?.description}</p>
-
-                    {/* Read More Button */}
-                    <button className="mt-4 text-blue-600 flex items-center">
-                      ➕ Read more
+                <div className="p-6 text-gray-700">
+                  <p className="whitespace-pre-line">
+                    {isDescriptionExpanded
+                      ? product.description
+                      : product.description.slice(0, DESCRIPTION_LIMIT) +
+                        (product.description.length > DESCRIPTION_LIMIT ? "..." : "")}
+                  </p>
+                  {product.description.length > DESCRIPTION_LIMIT && (
+                    <button
+                      onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
+                      className="mt-4 text-blue-600 flex items-center hover:text-blue-700"
+                    >
+                      {isDescriptionExpanded ? "➖ Show less" : "➕ Read more"}
                     </button>
-                  </div>
+                  )}
                 </div>
-              )}
+              </div>
+            )}
 
+            {/* Render Search Volume addon if enabled */}
+            {renderAddonSection("search_volume")}
 
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Search size={24} className="text-blue-500" />
-                <h2 className="text-lg font-semibold">Search Volume Analysis</h2>
-              </div>
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <p className="text-3xl font-bold text-gray-900">{product.searchVolume.monthly.toLocaleString()}</p>
-                  <p className="text-sm text-gray-500">Monthly searches</p>
-                </div>
-                <span
-                  className={`px-3 py-1 text-sm font-medium rounded-full ${
-                    product.searchVolume.trend === "increasing"
-                      ? "bg-green-100 text-green-800"
-                      : "bg-red-100 text-red-800"
-                  }`}
-                >
-                  {product.searchVolume.trend === "increasing" ? "Trending Up" : "Trending Down"}
-                </span>
-              </div>
-
-              <div className="space-y-3">
-                <h3 className="text-sm font-medium text-gray-700">Related Search Terms</h3>
-                {product.searchVolume.relatedTerms.map((term, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <span className="text-gray-700">{term.term}</span>
-                    <span className="text-sm font-medium text-gray-900">
-                      {term.volume.toLocaleString()} searches/mo
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <DollarSign size={24} className="text-green-500" />
-                <h2 className="text-lg font-semibold">Estimated Monthly Revenue</h2>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <p className="text-sm text-gray-500 mb-1">CONSERVATIVE</p>
-                  <p className="text-xl font-bold text-gray-900">
-                    {calculateMonthlyRevenue(product.estimatedSales.low)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">{product.estimatedSales.low} sales/month</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-4 border-2 border-green-100">
-                  <p className="text-sm text-gray-500 mb-1">REALISTIC</p>
-                  <p className="text-xl font-bold text-green-600">
-                    {calculateMonthlyRevenue(product.estimatedSales.average)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">{product.estimatedSales.average} sales/month</p>
-                </div>
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <p className="text-sm text-gray-500 mb-1">OPTIMISTIC</p>
-                  <p className="text-xl font-bold text-gray-900">
-                    {calculateMonthlyRevenue(product.estimatedSales.high)}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">{product.estimatedSales.high} sales/month</p>
-                </div>
-              </div>
-            </div>
+            {/* Render Monthly Revenue addon if enabled */}
+            {renderAddonSection("monthly_revenue")}
 
             <div className="block sm:hidden bg-white rounded-xl overflow-hidden border border-gray-200">
               <img
@@ -383,62 +712,11 @@ const ProductDetails = () => {
               />
             </div>
 
-            {/* Marketplace Links Section */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <ExternalLink size={24} className="text-blue-500" />
-                <h2 className="text-lg font-semibold">Marketplace Links</h2>
-              </div>
-              <div className="space-y-3">
-                {marketplaceLinks.map((link, index) => (
-                  <a
-                    key={index}
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group"
-                  >
-                    <span className="text-gray-700">{link.platform}</span>
-                    <ExternalLink size={18} className="text-gray-400 group-hover:text-primary transition-colors" />
-                  </a>
-                ))}
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <div className="flex items-center gap-2 mb-6">
-                <ShoppingBag size={24} className="text-[#FF4646]" />
-                <h2 className="text-lg font-semibold">Aliexpress Suppliers</h2>
-              </div>
-              <div className="space-y-3">
-                {aliexpressSuppliers.map((supplier, index) => (
-                  <a
-                    key={index}
-                    href={supplier.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group"
-                  >
-                    <span className="text-gray-700">{supplier.name}</span>
-                    <ExternalLink size={18} className="text-gray-400 group-hover:text-[#FF4646] transition-colors" />
-                  </a>
-                ))}
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold mb-4">Product Descripion</h2>
-              {product.specs && product.specs.length > 0 ? (
-                <div className="space-y-2">
-                  {product.specs.map((spec, index) => (
-                    <div key={index} className="flex gap-2">
-                      <span className="text-gray-600 font-medium">{spec.label}:</span>
-                      <span className="text-gray-600">{spec.value}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p>No specifications available!</p>
-              )}
-            </div>
+            {/* Render Marketplace Links addon if enabled */}
+            {renderAddonSection("marketplace_links")}
+
+            {/* Render Aliexpress Suppliers addon if enabled */}
+            {renderAddonSection("aliexpress_suppliers")}
           </div>
         </div>
       </div>
@@ -447,3 +725,4 @@ const ProductDetails = () => {
 }
 
 export default ProductDetails
+

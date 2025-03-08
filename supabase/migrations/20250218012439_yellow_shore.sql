@@ -480,3 +480,49 @@ CREATE TRIGGER trigger_auto_lock_pagination
 AFTER INSERT ON products
 FOR EACH STATEMENT
 EXECUTE FUNCTION auto_lock_pagination();
+
+
+-- First, create the trigger_set_timestamp function
+CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+
+
+-- Then create the product_addons table
+CREATE TABLE product_addons (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT,
+  enabled BOOLEAN DEFAULT true,
+  "order" INTEGER DEFAULT 0,  -- Note the double quotes around order
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create an index on the type column for faster queries
+CREATE INDEX idx_product_addons_type ON product_addons(type);
+
+-- Finally, add the trigger to update the updated_at timestamp
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON product_addons
+FOR EACH ROW
+EXECUTE FUNCTION trigger_set_timestamp();
+
+
+-- Add product_id column to product_addons table to link addons to specific products
+ALTER TABLE product_addons ADD COLUMN IF NOT EXISTS product_id UUID REFERENCES products(id) ON DELETE CASCADE;
+
+-- Create index for faster queries
+CREATE INDEX IF NOT EXISTS idx_product_addons_product_id ON product_addons(product_id);
+
+-- Update RLS policies
+CREATE POLICY "Authenticated users can manage product addons"
+  ON product_addons FOR ALL TO authenticated USING (true) WITH CHECK (true);

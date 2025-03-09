@@ -304,7 +304,7 @@ const Dashboard = () => {
               {/* Product Image */}
               <div className="relative w-[180px] shrink-0">
                 <img
-                  src={product.images ? product.images[0] : "/"}
+                  src={product.images && product.images.length > 0 ? product.images[0] : "/placeholder.svg"}
                   alt={product.name}
                   className="w-full h-full object-cover"
                 />

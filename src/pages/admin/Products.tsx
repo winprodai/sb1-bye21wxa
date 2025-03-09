@@ -1,7 +1,20 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { Plus, Search, Filter, Trash2, Edit, ChevronDown, Lock, Unlock, Save, X, ImageIcon } from "lucide-react"
+import {
+  Plus,
+  Search,
+  Filter,
+  Trash2,
+  Edit,
+  ChevronDown,
+  Lock,
+  Unlock,
+  Save,
+  X,
+  ImageIcon,
+  Loader2,
+} from "lucide-react"
 import { supabase } from "../../lib/supabase"
 
 interface Product {
@@ -63,6 +76,25 @@ interface ProductFormData {
 
 interface ProductWithCategories extends Product {
   categories: Category[]
+}
+
+// Function to check if the storage bucket exists and is accessible
+const checkStorageBucket = async () => {
+  try {
+    // Try to list files in the bucket to check if it exists and is accessible
+    const { data, error } = await supabase.storage.from("productImages").list()
+
+    if (error) {
+      console.error("Error accessing productImages bucket:", error)
+      return false
+    }
+
+    console.log("productImages bucket is accessible")
+    return true
+  } catch (error) {
+    console.error("Error checking storage bucket:", error)
+    return false
+  }
 }
 
 const fetchProductsAPI = async (): Promise<ProductWithCategories[]> => {
@@ -446,6 +478,7 @@ const AdminProducts: React.FC = () => {
   // State variables
   const [products, setProducts] = useState<ProductWithCategories[]>([])
   const [loading, setLoading] = useState<boolean>(true)
+  const [uploading, setUploading] = useState<boolean>(false)
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [showAddModal, setShowAddModal] = useState<boolean>(false)
@@ -453,6 +486,7 @@ const AdminProducts: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<ProductWithCategories | null>(null)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [categories, setCategories] = useState<Category[]>([])
+  const [bucketReady, setBucketReady] = useState<boolean>(false)
 
   // Local state for modal form
   const [formData, setFormData] = useState<ProductFormData>({
@@ -494,6 +528,19 @@ const AdminProducts: React.FC = () => {
   // ----------------------------
   // Data Fetching
   // ----------------------------
+
+  // Check if the storage bucket exists
+  useEffect(() => {
+    const checkBucket = async () => {
+      const ready = await checkStorageBucket()
+      setBucketReady(ready)
+      if (!ready) {
+        console.error("Cannot access productImages bucket. Please ensure it exists in your Supabase project.")
+      }
+    }
+
+    checkBucket()
+  }, [])
 
   // Fetch products when component mounts
   useEffect(() => {
@@ -645,29 +692,87 @@ const AdminProducts: React.FC = () => {
    * @param files - The files to upload.
    */
   const handleImageUpload = async (files: FileList) => {
+    if (!bucketReady) {
+      alert("Storage bucket 'productImages' is not accessible. Please check your storage policies.")
+      return
+    }
+
     try {
+      setUploading(true)
+
+      // Log the files being uploaded
+      console.log(
+        "Files to upload:",
+        Array.from(files).map((f) => ({ name: f.name, type: f.type, size: f.size })),
+      )
+
       const urls: string[] = []
-      for (const file of Array.from(files)) {
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+
+        // Create a unique file name
         const fileExt = file.name.split(".").pop()
-        const fileName = `${Math.random()}.${fileExt}`
-        const filePath = `product-images/${fileName}` //folder-name, file
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+        const filePath = `${fileName}`
 
-        const { error: uploadError } = await supabase.storage
-          .from("productImages") //bucket name
-          .upload(filePath, file)
-        if (uploadError) throw uploadError
+        console.log(`Uploading file ${i + 1}/${files.length}: ${file.name} as ${filePath}`)
 
-        const { data } = supabase.storage.from("productImages").getPublicUrl(filePath)
-        if (data?.publicUrl) {
-          urls.push(data.publicUrl)
+        // Upload the file
+        const { data, error } = await supabase.storage.from("productImages").upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        })
+
+        if (error) {
+          console.error(`Error uploading file ${file.name}:`, error.message)
+
+          // Check if it's a permissions error
+          if (error.message.includes("permission") || error.message.includes("policy")) {
+            alert(`Permission denied: ${error.message}. Please check your storage policies.`)
+            setUploading(false)
+            return
+          }
+
+          alert(`Error uploading ${file.name}: ${error.message}`)
+          continue
+        }
+
+        console.log(`File ${i + 1} uploaded successfully:`, data)
+
+        // Get the public URL
+        const { data: publicUrlData } = supabase.storage.from("productImages").getPublicUrl(filePath)
+
+        if (publicUrlData?.publicUrl) {
+          console.log(`Public URL for ${filePath}:`, publicUrlData.publicUrl)
+          urls.push(publicUrlData.publicUrl)
+        } else {
+          console.error(`Failed to get public URL for ${filePath}`)
         }
       }
-      setFormData((prev: ProductFormData) => ({
-        ...prev,
-        images: [...prev.images, ...urls],
-      }))
+
+      if (urls.length > 0) {
+        console.log("Setting form data with new images:", urls)
+
+        // Update the form data with the new image URLs
+        setFormData((prev) => {
+          const updatedFormData = {
+            ...prev,
+            images: [...prev.images, ...urls],
+          }
+          console.log("Updated form data:", updatedFormData)
+          return updatedFormData
+        })
+
+        alert(`Successfully uploaded ${urls.length} image(s)`)
+      } else {
+        alert("No images were uploaded successfully.")
+      }
     } catch (error) {
-      console.error("Error uploading images:", error)
+      console.error("Error in handleImageUpload:", error)
+      alert(`Error uploading images: ${error.message || "Unknown error"}`)
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -718,12 +823,15 @@ const AdminProducts: React.FC = () => {
 
     // Update local form when the parent formData changes (for edit mode)
     useEffect(() => {
+      console.log("Form data updated:", formData)
       setLocalFormData({ ...formData })
     }, [formData])
 
     // Handle form submission
     const handleSubmit = (e: React.FormEvent) => {
       e.preventDefault()
+      console.log("Submitting form with data:", localFormData)
+
       // Update the parent formData with our local version
       setFormData(localFormData)
 
@@ -851,7 +959,8 @@ const AdminProducts: React.FC = () => {
                   multiple
                   accept="image/*"
                   onChange={(e) => {
-                    if (e.target.files) {
+                    if (e.target.files && e.target.files.length > 0) {
+                      // Call the parent component's handleImageUpload
                       handleImageUpload(e.target.files)
                     }
                   }}
@@ -859,33 +968,62 @@ const AdminProducts: React.FC = () => {
                   id="images"
                 />
                 <label htmlFor="images" className="flex flex-col items-center justify-center cursor-pointer">
-                  <ImageIcon className="h-8 w-8 text-gray-400 mb-2" />
-                  <span className="text-sm text-gray-500">Click to upload images</span>
+                  {uploading ? (
+                    <div className="flex flex-col items-center">
+                      <Loader2 className="h-8 w-8 text-gray-400 mb-2 animate-spin" />
+                      <span className="text-sm text-gray-500">Uploading images...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <ImageIcon className="h-8 w-8 text-gray-400 mb-2" />
+                      <span className="text-sm text-gray-500">Click to upload images</span>
+                      <span className="text-xs text-gray-400 mt-1">First image will be used as the main image</span>
+                    </>
+                  )}
                 </label>
               </div>
               {localFormData.images && localFormData.images.length > 0 && (
-                <div className="mt-4 grid grid-cols-4 gap-4">
-                  {localFormData.images.map((url: string, index: number) => (
-                    <div key={index} className="relative group">
-                      <img
-                        src={url || "/placeholder.svg"}
-                        alt={`Preview ${index + 1}`}
-                        className="h-24 w-full object-cover rounded-lg"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setLocalFormData({
-                            ...localFormData,
-                            images: localFormData.images.filter((_: any, i: number) => i !== index),
-                          })
-                        }
-                        className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
+                <div className="mt-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-medium">Uploaded Images ({localFormData.images.length})</h4>
+                    <p className="text-xs text-gray-500">First image is main</p>
+                  </div>
+                  <div className="grid grid-cols-4 gap-4">
+                    {localFormData.images.map((url, index) => (
+                      <div key={index} className="relative group">
+                        <img
+                          src={url || "/placeholder.svg"}
+                          alt={`Preview ${index + 1}`}
+                          className="h-24 w-full object-cover rounded-lg border border-gray-200"
+                          onError={(e) => {
+                            // If image fails to load, replace with placeholder
+                            ;(e.target as HTMLImageElement).src = "/placeholder.svg"
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newImages = [...localFormData.images]
+                              newImages.splice(index, 1)
+                              setLocalFormData({
+                                ...localFormData,
+                                images: newImages,
+                              })
+                            }}
+                            className="p-1 bg-red-500 text-white rounded-full"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        {index === 0 && (
+                          <div className="absolute top-1 left-1 bg-primary text-white text-xs px-2 py-0.5 rounded">
+                            Main
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

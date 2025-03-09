@@ -1,8 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import type React from "react"
+
+import { useState, useEffect, useRef } from "react"
 import { useParams } from "react-router-dom"
-import { ShoppingCart, Lock, Bookmark, DollarSign, ShoppingBag, Search, ExternalLink, Play } from "lucide-react"
+import { ShoppingCart, Bookmark, DollarSign, ShoppingBag, Search, ExternalLink, Play, ZoomIn } from "lucide-react"
 import { supabase } from "../lib/supabase"
 
 const ProductDetails = () => {
@@ -11,12 +13,15 @@ const ProductDetails = () => {
   const isPro = false
   const [product, setProduct] = useState<any>({})
   const [loading, setLoading] = useState(true)
-  const [selectedImage, setSelectedImage] = useState(0)
   const [categories, setCategories] = useState<string[]>([])
   const [addons, setAddons] = useState<any>({})
   const [addonSettings, setAddonSettings] = useState<any>({})
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const DESCRIPTION_LIMIT = 300 // Show "Read more" if text is longer than 300 characters
+  const [selectedImage, setSelectedImage] = useState(0)
+  const [isZoomed, setIsZoomed] = useState(false)
+  const [zoomPosition, setZoomPosition] = useState({ x: 0, y: 0 })
+  const imageRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -169,6 +174,17 @@ const ProductDetails = () => {
     if (id) fetchProduct()
   }, [id])
 
+  useEffect(() => {
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isZoomed) {
+        setIsZoomed(false)
+      }
+    }
+
+    window.addEventListener("keydown", handleEscKey)
+    return () => window.removeEventListener("keydown", handleEscKey)
+  }, [isZoomed])
+
   const calculateMonthlyRevenue = (sales: number, profitPerSale: number) => {
     const revenue = sales * profitPerSale
     return revenue.toLocaleString("en-US", {
@@ -186,16 +202,29 @@ const ProductDetails = () => {
   const getTikTokEmbedUrl = (url: string) => {
     try {
       // Handle different TikTok URL formats
-      const patterns = [/video\/(\d+)/, /\/v\/(\d+)/, /\/t\/([^/]+)/]
+      // For direct TikTok URLs
+      if (url.includes("tiktok.com")) {
+        // Extract username and video ID from URL
+        const matches = url.match(/(@[^/]+)\/video\/(\d+)/) || url.match(/\/t\/([^/]+)/) || url.match(/\/v\/(\d+)/)
 
-      for (const pattern of patterns) {
-        const match = url.match(pattern)
-        if (match && match[1]) {
-          return `https://www.tiktok.com/embed/${match[1]}`
+        if (matches) {
+          // If we have a username and video ID
+          if (matches.length > 2) {
+            return `https://www.tiktok.com/embed/v2/${matches[2]}`
+          }
+          // If we just have a shortcode
+          else if (matches.length > 1) {
+            return `https://www.tiktok.com/embed/v2/${matches[1]}`
+          }
         }
       }
 
-      // If no pattern matches, return the original URL
+      // If it's already an embed URL, return it
+      if (url.includes("tiktok.com/embed")) {
+        return url
+      }
+
+      // Fallback to direct URL if we can't parse it
       return url
     } catch (e) {
       console.error("Error parsing TikTok URL:", e)
@@ -203,7 +232,7 @@ const ProductDetails = () => {
     }
   }
 
-  // Parse video URLs from settings
+  // Parse video URLs from settings or use sample videos
   const getVideoUrls = () => {
     if (addonSettings.viral_videos && addonSettings.viral_videos.video_urls) {
       return addonSettings.viral_videos.video_urls
@@ -211,10 +240,11 @@ const ProductDetails = () => {
         .filter((url) => url.trim())
         .slice(0, addonSettings.viral_videos.max_videos || 5)
     }
+    // Sample TikTok videos that should work with embedding
     return [
-      "https://www.tiktok.com/t/ZT29xucKT/",
-      "https://www.tiktok.com/t/ZT29xucKT/",
-      "https://www.tiktok.com/t/ZT29xucKT/",
+      "https://www.tiktok.com/@tiktok/video/7106594312292453675",
+      "https://www.tiktok.com/@khaby.lame/video/7107645242927393030",
+      "https://www.tiktok.com/@charlidamelio/video/7107133462292423979",
     ]
   }
 
@@ -356,21 +386,12 @@ const ProductDetails = () => {
                 {getRelatedTerms()
                   .slice(0, settings.max_related_terms || 5)
                   .map((term, index) => (
-                    <a
-                      key={index}
-                      href={term.url || `https://google.com/search?q=${encodeURIComponent(term.term)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group"
-                    >
+                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                       <span className="text-gray-700">{term.term}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-gray-900">
-                          {term.volume.toLocaleString()} searches/mo
-                        </span>
-                        <ExternalLink size={18} className="text-gray-400 group-hover:text-primary transition-colors" />
-                      </div>
-                    </a>
+                      <span className="text-sm font-medium text-gray-900">
+                        {term.volume.toLocaleString()} searches/mo
+                      </span>
+                    </div>
                   ))}
               </div>
             )}
@@ -467,12 +488,14 @@ const ProductDetails = () => {
                 <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-6 px-6">
                   {videoUrls.map((video, index) => (
                     <div key={index} className="relative flex-shrink-0 w-[280px] snap-start">
-                      <div className="aspect-[9/10] bg-gray-100 rounded-lg overflow-hidden">
+                      <div className="aspect-[9/16] bg-gray-100 rounded-lg overflow-hidden">
                         <iframe
                           src={getTikTokEmbedUrl(video)}
                           className="w-full h-full"
                           allowFullScreen
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          sandbox="allow-scripts allow-same-origin allow-popups"
+                          referrerPolicy="strict-origin"
                         />
                       </div>
                       {(settings.show_views === undefined || settings.show_views) && (
@@ -581,57 +604,82 @@ const ProductDetails = () => {
     )
   }
 
+  const handleImageMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isZoomed || !imageRef.current) return
+
+    const { left, top, width, height } = imageRef.current.getBoundingClientRect()
+    const x = ((e.clientX - left) / width) * 100
+    const y = ((e.clientY - top) / height) * 100
+
+    setZoomPosition({ x, y })
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 mt-[40px] sm:mt-[40px] lg:mt-0">
       <div className="max-w-7xl mx-auto px-4 pt-[8px] pb-6 md:pt-4 md:pb-12 lg:pt-7 lg:pb-16">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-8 md:gap-16 lg:gap-16">
           <div className="space-y-4">
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
+            <div
+              className="bg-white rounded-xl p-4 border border-gray-200"
+              ref={imageRef}
+              onMouseMove={handleImageMouseMove}
+              onClick={() => isZoomed && setIsZoomed(false)}
+            >
               <div className="relative">
-                <img
-                  src={product.images[selectedImage] || "/placeholder.svg"}
-                  alt={product.name}
-                  className="w-full aspect-square object-contain rounded-lg"
-                />
-                {!isPro && selectedImage > 0 && (
-                  <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] rounded-lg flex flex-col items-center justify-center">
-                    <Lock size={32} className="text-white mb-2" />
-                    <div className="text-white text-center px-6">
-                      <p className="font-semibold mb-2">Join Pro to Remove Watermark</p>
-                      <button className="bg-primary hover:bg-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors">
-                        Upgrade to Pro
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <div
+                  className="relative w-full aspect-square overflow-hidden rounded-lg cursor-zoom-in"
+                  onClick={() => setIsZoomed(true)}
+                >
+                  {product.images && product.images[selectedImage] ? (
+                    <img
+                      src={product.images[selectedImage] || "/placeholder.svg"}
+                      alt={product.name}
+                      className={`w-full h-full ${isZoomed ? "absolute object-none" : "object-contain"}`}
+                      style={
+                        isZoomed
+                          ? {
+                              objectPosition: `${zoomPosition.x}% ${zoomPosition.y}%`,
+                              transform: "scale(2)",
+                              transformOrigin: `${zoomPosition.x}% ${zoomPosition.y}%`,
+                            }
+                          : {}
+                      }
+                    />
+                  ) : (
+                    <img src="/placeholder.svg" alt="Placeholder" className="w-full h-full object-contain" />
+                  )}
+                </div>
+                <button
+                  className="absolute top-2 right-2 p-2 bg-white/80 rounded-full shadow-md hover:bg-white transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setIsZoomed(true)
+                  }}
+                >
+                  <ZoomIn size={18} />
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-5 gap-2">
-              {[...product.images]?.reverse()?.map((image, index) => (
-                <button
-                  key={index}
-                  onClick={() => setSelectedImage(index)}
-                  className={`relative rounded-lg overflow-hidden border-2 transition-all ${
-                    selectedImage === index ? "border-primary" : "border-transparent hover:border-gray-200"
-                  }`}
-                >
-                  <img
-                    src={image || "/placeholder.svg"}
-                    alt={`${product.name} ${index + 1}`}
-                    className="w-full aspect-square object-cover"
-                  />
-                  {!isPro && index > 0 && (
-                    <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]">
-                      <Lock
-                        size={16}
-                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white"
-                      />
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
+            {product.images && product.images.length > 1 && (
+              <div className="grid grid-cols-5 gap-2">
+                {product.images.map((image, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedImage(index)}
+                    className={`relative rounded-lg overflow-hidden border-2 transition-all ${
+                      selectedImage === index ? "border-primary" : "border-transparent hover:border-gray-200"
+                    }`}
+                  >
+                    <img
+                      src={image || "/placeholder.svg"}
+                      alt={`${product.name} ${index + 1}`}
+                      className="w-full aspect-square object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Render Viral Videos addon if enabled */}
             {renderAddonSection("viral_videos")}

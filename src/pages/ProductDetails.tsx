@@ -202,29 +202,16 @@ const ProductDetails = () => {
   const getTikTokEmbedUrl = (url: string) => {
     try {
       // Handle different TikTok URL formats
-      // For direct TikTok URLs
-      if (url.includes("tiktok.com")) {
-        // Extract username and video ID from URL
-        const matches = url.match(/(@[^/]+)\/video\/(\d+)/) || url.match(/\/t\/([^/]+)/) || url.match(/\/v\/(\d+)/)
+      const patterns = [/video\/(\d+)/, /\/v\/(\d+)/, /\/t\/([^/]+)/]
 
-        if (matches) {
-          // If we have a username and video ID
-          if (matches.length > 2) {
-            return `https://www.tiktok.com/embed/v2/${matches[2]}`
-          }
-          // If we just have a shortcode
-          else if (matches.length > 1) {
-            return `https://www.tiktok.com/embed/v2/${matches[1]}`
-          }
+      for (const pattern of patterns) {
+        const match = url.match(pattern)
+        if (match && match[1]) {
+          return `https://www.tiktok.com/embed/${match[1]}`
         }
       }
 
-      // If it's already an embed URL, return it
-      if (url.includes("tiktok.com/embed")) {
-        return url
-      }
-
-      // Fallback to direct URL if we can't parse it
+      // If no pattern matches, return the original URL
       return url
     } catch (e) {
       console.error("Error parsing TikTok URL:", e)
@@ -232,7 +219,7 @@ const ProductDetails = () => {
     }
   }
 
-  // Parse video URLs from settings or use sample videos
+  // Parse video URLs from settings
   const getVideoUrls = () => {
     if (addonSettings.viral_videos && addonSettings.viral_videos.video_urls) {
       return addonSettings.viral_videos.video_urls
@@ -240,11 +227,10 @@ const ProductDetails = () => {
         .filter((url) => url.trim())
         .slice(0, addonSettings.viral_videos.max_videos || 5)
     }
-    // Sample TikTok videos that should work with embedding
     return [
-      "https://www.tiktok.com/@tiktok/video/7106594312292453675",
-      "https://www.tiktok.com/@khaby.lame/video/7107645242927393030",
-      "https://www.tiktok.com/@charlidamelio/video/7107133462292423979",
+      "https://www.tiktok.com/t/ZT29xucKT/",
+      "https://www.tiktok.com/t/ZT29xucKT/",
+      "https://www.tiktok.com/t/ZT29xucKT/",
     ]
   }
 
@@ -488,14 +474,12 @@ const ProductDetails = () => {
                 <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory scrollbar-hide -mx-6 px-6">
                   {videoUrls.map((video, index) => (
                     <div key={index} className="relative flex-shrink-0 w-[280px] snap-start">
-                      <div className="aspect-[9/16] bg-gray-100 rounded-lg overflow-hidden">
+                      <div className="aspect-[9/10] bg-gray-100 rounded-lg overflow-hidden">
                         <iframe
                           src={getTikTokEmbedUrl(video)}
                           className="w-full h-full"
                           allowFullScreen
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                          sandbox="allow-scripts allow-same-origin allow-popups"
-                          referrerPolicy="strict-origin"
                         />
                       </div>
                       {(settings.show_views === undefined || settings.show_views) && (

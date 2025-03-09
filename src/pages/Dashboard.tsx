@@ -127,10 +127,10 @@ const Dashboard = () => {
 
       // Fetch products
       let query = supabase.from("products").select(`
-        *,
-        product_categories!inner(category_id),
-        categories(id, name)
-      `)
+  *,
+  product_categories(category_id),
+  categories(id, name)
+`)
 
       // Apply category filter if not "all"
       if (selectedCategory !== "all") {
@@ -191,7 +191,18 @@ const Dashboard = () => {
           const savedIds = Array.from(savedProducts)
           setProducts((data || []).filter((product: any) => savedIds.includes(product.id)))
         } else {
-          setProducts(data || [])
+          const processedProducts = (data || []).map((product) => {
+            // Process categories to make them accessible in the UI
+            if (product.categories) {
+              product.categories = Array.isArray(product.categories)
+                ? product.categories
+                : [product.categories].filter(Boolean)
+            } else {
+              product.categories = []
+            }
+            return product
+          })
+          setProducts(processedProducts)
         }
       }
     }

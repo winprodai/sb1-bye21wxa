@@ -763,8 +763,6 @@ const AdminProducts: React.FC = () => {
           console.log("Updated form data:", updatedFormData)
           return updatedFormData
         })
-
-        alert(`Successfully uploaded ${urls.length} image(s)`)
       } else {
         alert("No images were uploaded successfully.")
       }
@@ -820,12 +818,13 @@ const AdminProducts: React.FC = () => {
   const ProductModal = ({ isEdit = false }: { isEdit?: boolean }) => {
     // Create local state for the form to avoid state update issues
     const [localFormData, setLocalFormData] = useState<ProductFormData>(() => ({ ...formData }))
+    const [localUploading, setLocalUploading] = useState<boolean>(false)
 
-    // Update local form when the parent formData changes (for edit mode)
+    // Initialize local form data when modal opens or editing product changes
     useEffect(() => {
-      console.log("Form data updated:", formData)
+      console.log("Initializing form data:", formData)
       setLocalFormData({ ...formData })
-    }, [formData])
+    }, [isEdit, editingProduct])
 
     // Handle form submission
     const handleSubmit = (e: React.FormEvent) => {
@@ -840,6 +839,92 @@ const AdminProducts: React.FC = () => {
         handleEditProduct(e)
       } else {
         handleAddProduct(e)
+      }
+    }
+
+    // Handle image upload directly in the modal component
+    const handleLocalImageUpload = async (files: FileList) => {
+      if (!bucketReady) {
+        alert("Storage bucket 'productImages' is not accessible. Please check your storage policies.")
+        return
+      }
+
+      try {
+        setLocalUploading(true)
+
+        // Log the files being uploaded
+        console.log(
+          "Files to upload:",
+          Array.from(files).map((f) => ({ name: f.name, type: f.type, size: f.size })),
+        )
+
+        const urls: string[] = []
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i]
+
+          // Create a unique file name
+          const fileExt = file.name.split(".").pop()
+          const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+          const filePath = `${fileName}`
+
+          console.log(`Uploading file ${i + 1}/${files.length}: ${file.name} as ${filePath}`)
+
+          // Upload the file
+          const { data, error } = await supabase.storage.from("productImages").upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+          })
+
+          if (error) {
+            console.error(`Error uploading file ${file.name}:`, error.message)
+
+            // Check if it's a permissions error
+            if (error.message.includes("permission") || error.message.includes("policy")) {
+              alert(`Permission denied: ${error.message}. Please check your storage policies.`)
+              setLocalUploading(false)
+              return
+            }
+
+            alert(`Error uploading ${file.name}: ${error.message}`)
+            continue
+          }
+
+          console.log(`File ${i + 1} uploaded successfully:`, data)
+
+          // Get the public URL
+          const { data: publicUrlData } = supabase.storage.from("productImages").getPublicUrl(filePath)
+
+          if (publicUrlData?.publicUrl) {
+            console.log(`Public URL for ${filePath}:`, publicUrlData.publicUrl)
+            urls.push(publicUrlData.publicUrl)
+          } else {
+            console.error(`Failed to get public URL for ${filePath}`)
+          }
+        }
+
+        if (urls.length > 0) {
+          console.log("Setting local form data with new images:", urls)
+
+          // Update the local form data with the new image URLs
+          setLocalFormData((prev) => {
+            const updatedFormData = {
+              ...prev,
+              images: [...prev.images, ...urls],
+            }
+            console.log("Updated local form data:", updatedFormData)
+            return updatedFormData
+          })
+
+          alert(`Successfully uploaded ${urls.length} image(s)`)
+        } else {
+          alert("No images were uploaded successfully.")
+        }
+      } catch (error) {
+        console.error("Error in handleLocalImageUpload:", error)
+        alert(`Error uploading images: ${error.message || "Unknown error"}`)
+      } finally {
+        setLocalUploading(false)
       }
     }
 
@@ -960,15 +1045,15 @@ const AdminProducts: React.FC = () => {
                   accept="image/*"
                   onChange={(e) => {
                     if (e.target.files && e.target.files.length > 0) {
-                      // Call the parent component's handleImageUpload
-                      handleImageUpload(e.target.files)
+                      // Call the local image upload handler
+                      handleLocalImageUpload(e.target.files)
                     }
                   }}
                   className="hidden"
                   id="images"
                 />
                 <label htmlFor="images" className="flex flex-col items-center justify-center cursor-pointer">
-                  {uploading ? (
+                  {localUploading ? (
                     <div className="flex flex-col items-center">
                       <Loader2 className="h-8 w-8 text-gray-400 mb-2 animate-spin" />
                       <span className="text-sm text-gray-500">Uploading images...</span>

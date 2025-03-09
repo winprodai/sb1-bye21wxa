@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import {
   Plus,
   Search,
@@ -167,6 +167,8 @@ const createProductAPI = async (
   categoryIds: string[],
 ): Promise<ProductWithCategories | null> => {
   try {
+    console.log("Creating product with data:", productData)
+
     // First, create the product
     const { data: product, error: productError } = await supabase.from("products").insert([productData]).select()
 
@@ -174,6 +176,7 @@ const createProductAPI = async (
     if (!product || product.length === 0) return null
 
     const newProduct = product[0]
+    console.log("Product created successfully:", newProduct)
 
     // Then, create the category relationships
     if (categoryIds.length > 0) {
@@ -182,15 +185,20 @@ const createProductAPI = async (
         category_id: categoryId,
       }))
 
+      console.log("Creating category relationships:", categoryRelations)
       const { error: relationError } = await supabase.from("product_categories").insert(categoryRelations)
 
       if (relationError) throw relationError
+      console.log("Category relationships created successfully")
     }
 
     // Return the product with its categories
+    const categories = await getCategoriesForProduct(newProduct.id)
+    console.log("Retrieved categories for product:", categories)
+
     return {
       ...newProduct,
-      categories: await getCategoriesForProduct(newProduct.id),
+      categories,
     }
   } catch (error) {
     console.error("Error creating product:", error)
@@ -641,51 +649,9 @@ const AdminProducts: React.FC = () => {
   /**
    * Handle submission of the add product form.
    */
-  const handleAddProduct = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    // Convert form data to product data (excluding category_ids)
-    const productData = convertFormDataToProductData(formData)
-    const categoryIds = formData.category_ids
-
-    const newProduct = await createProductAPI(productData, categoryIds)
-    if (newProduct) {
-      // Create a default "Profit & Cost" addon for this product
-      await createDefaultProfitCostAddon(newProduct)
-
-      setProducts([newProduct, ...products])
-      resetFormData()
-      setShowAddModal(false)
-    }
-  }
-
-  /**
-   * Handle submission of the edit product form.
-   */
-  const handleEditProduct = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingProduct) return
-
-    // Convert form data to product data (excluding category_ids)
-    const productData = convertFormDataToProductData(formData)
-    const categoryIds = formData.category_ids
-
-    console.log("Updating product:", editingProduct.id, productData, categoryIds)
-
-    const updated = await updateProductAPI(editingProduct.id, productData, categoryIds)
-    if (updated) {
-      console.log("Product updated successfully:", updated)
-
-      // Update the profit_cost addon for this product
-      await updateProductProfitCostAddon(updated)
-
-      setProducts(products.map((p) => (p.id === editingProduct.id ? updated : p)))
-      resetFormData()
-      setShowEditModal(false)
-    } else {
-      console.error("Failed to update product")
-    }
-  }
+  // Remove these functions:
+  // const handleAddProduct = async (productFormData: ProductFormData): Promise<void> => { ... }
+  // const handleEditProduct = async (productFormData: ProductFormData): Promise<void> => { ... }
 
   /**
    * Handle image upload and update form data with image URLs.
@@ -819,6 +785,11 @@ const AdminProducts: React.FC = () => {
     // Create local state for the form to avoid state update issues
     const [localFormData, setLocalFormData] = useState<ProductFormData>(() => ({ ...formData }))
     const [localUploading, setLocalUploading] = useState<boolean>(false)
+    const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
+
+    // Use a ref to track if submission is in progress to prevent duplicate submissions
+    const isSubmittingRef = useRef<boolean>(false)
+    const formRef = useRef<HTMLFormElement>(null)
 
     // Initialize local form data when modal opens or editing product changes
     useEffect(() => {
@@ -826,20 +797,107 @@ const AdminProducts: React.FC = () => {
       setLocalFormData({ ...formData })
     }, [isEdit, editingProduct])
 
-    // Handle form submission
+    // Handle form submission with a direct approach
     const handleSubmit = (e: React.FormEvent) => {
       e.preventDefault()
-      console.log("Submitting form with data:", localFormData)
 
-      // Update the parent formData with our local version
-      setFormData(localFormData)
-
-      // Then submit the form
-      if (isEdit) {
-        handleEditProduct(e)
-      } else {
-        handleAddProduct(e)
+      // Prevent multiple submissions
+      if (isSubmittingRef.current) {
+        console.log("Submission already in progress, ignoring click")
+        return
       }
+
+      // Set both the state and ref to indicate submission is in progress
+      setIsSubmitting(true)
+      isSubmittingRef.current = true
+
+      console.log("Form submission started with data:", localFormData)
+
+      // Use a timeout to ensure UI updates before processing
+      setTimeout(() => {
+        // Process the form submission directly
+        try {
+          // Convert form data to product data
+          const productData = convertFormDataToProductData(localFormData)
+          const categoryIds = localFormData.category_ids
+
+          console.log("Processing submission:", isEdit ? "edit" : "add")
+
+          if (isEdit) {
+            // For editing
+            if (!editingProduct) {
+              throw new Error("No editing product set")
+            }
+
+            // Update the product
+            updateProductAPI(editingProduct.id, productData, categoryIds)
+              .then((updated) => {
+                if (updated) {
+                  console.log("Product updated successfully:", updated)
+
+                  // Update the profit_cost addon for this product
+                  updateProductProfitCostAddon(updated).then(() => {
+                    // Update the products list
+                    setProducts((prevProducts) => prevProducts.map((p) => (p.id === editingProduct.id ? updated : p)))
+
+                    // Reset form and close modal
+                    resetFormData()
+                    setShowEditModal(false)
+                    console.log("Edit completed and modal closed")
+                  })
+                } else {
+                  throw new Error("Failed to update product - API returned null")
+                }
+              })
+              .catch((error) => {
+                console.error("Error updating product:", error)
+                alert(`Error updating product: ${error.message || "Unknown error"}`)
+              })
+              .finally(() => {
+                // Reset submission state
+                setIsSubmitting(false)
+                isSubmittingRef.current = false
+              })
+          } else {
+            // For adding
+            createProductAPI(productData, categoryIds)
+              .then((newProduct) => {
+                if (newProduct) {
+                  console.log("New product created:", newProduct)
+
+                  // Create a default "Profit & Cost" addon for this product
+                  createDefaultProfitCostAddon(newProduct).then(() => {
+                    // Update the products list
+                    setProducts((prevProducts) => [newProduct, ...prevProducts])
+
+                    // Reset form and close modal
+                    resetFormData()
+                    setShowAddModal(false)
+                    console.log("Product added successfully and modal closed")
+                  })
+                } else {
+                  throw new Error("Failed to create product - API returned null")
+                }
+              })
+              .catch((error) => {
+                console.error("Error in handleAddProduct:", error)
+                alert(`Error adding product: ${error.message || "Unknown error"}`)
+              })
+              .finally(() => {
+                // Reset submission state
+                setIsSubmitting(false)
+                isSubmittingRef.current = false
+              })
+          }
+        } catch (error) {
+          console.error("Error processing form:", error)
+          alert(`Error ${isEdit ? "updating" : "adding"} product: ${error.message || "Unknown error"}`)
+
+          // Reset submission state
+          setIsSubmitting(false)
+          isSubmittingRef.current = false
+        }
+      }, 0)
     }
 
     // Handle image upload directly in the modal component
@@ -934,16 +992,20 @@ const AdminProducts: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold">{isEdit ? "Edit Product" : "Add New Product"}</h2>
             <button
+              type="button"
               onClick={() => {
-                isEdit ? setShowEditModal(false) : setShowAddModal(false)
-                resetFormData()
+                if (!isSubmittingRef.current) {
+                  isEdit ? setShowEditModal(false) : setShowAddModal(false)
+                  resetFormData()
+                }
               }}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              disabled={isSubmitting}
             >
               <X size={20} className="text-gray-500" />
             </button>
           </div>
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
             {/* Basic Information */}
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="text-lg font-medium mb-4">Basic Information</h3>
@@ -955,6 +1017,7 @@ const AdminProducts: React.FC = () => {
                   onChange={(e) => setLocalFormData({ ...localFormData, name: e.target.value })}
                   required
                   className="border p-2 mb-2 w-full"
+                  disabled={isSubmitting}
                 />
                 <textarea
                   placeholder="Product Description"
@@ -962,6 +1025,7 @@ const AdminProducts: React.FC = () => {
                   onChange={(e) => setLocalFormData({ ...localFormData, description: e.target.value })}
                   required
                   className="border p-2 mb-2 w-full"
+                  disabled={isSubmitting}
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <input
@@ -972,6 +1036,7 @@ const AdminProducts: React.FC = () => {
                     onChange={(e) => setLocalFormData({ ...localFormData, selling_price: e.target.value })}
                     required
                     className="border p-2 mb-2 w-full"
+                    disabled={isSubmitting}
                   />
                   <input
                     type="number"
@@ -981,6 +1046,7 @@ const AdminProducts: React.FC = () => {
                     onChange={(e) => setLocalFormData({ ...localFormData, product_cost: e.target.value })}
                     required
                     className="border p-2 mb-2 w-full"
+                    disabled={isSubmitting}
                   />
                 </div>
 
@@ -1008,6 +1074,7 @@ const AdminProducts: React.FC = () => {
                             }
                           }}
                           className="rounded border-gray-300"
+                          disabled={isSubmitting}
                         />
                         <label htmlFor={`category-${category.id}`} className="text-sm">
                           {category.name}
@@ -1023,6 +1090,7 @@ const AdminProducts: React.FC = () => {
                     type="checkbox"
                     checked={localFormData.is_top_product || false}
                     onChange={(e) => setLocalFormData({ ...localFormData, is_top_product: e.target.checked })}
+                    disabled={isSubmitting}
                   />
                   <label>Top Product</label>
                 </div>
@@ -1032,6 +1100,7 @@ const AdminProducts: React.FC = () => {
                   value={localFormData.priority}
                   onChange={(e) => setLocalFormData({ ...localFormData, priority: Number(e.target.value) })}
                   className="border p-2 mb-2 w-full"
+                  disabled={isSubmitting}
                 />
               </div>
             </div>
@@ -1051,8 +1120,12 @@ const AdminProducts: React.FC = () => {
                   }}
                   className="hidden"
                   id="images"
+                  disabled={isSubmitting || localUploading}
                 />
-                <label htmlFor="images" className="flex flex-col items-center justify-center cursor-pointer">
+                <label
+                  htmlFor="images"
+                  className={`flex flex-col items-center justify-center ${isSubmitting || localUploading ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+                >
                   {localUploading ? (
                     <div className="flex flex-col items-center">
                       <Loader2 className="h-8 w-8 text-gray-400 mb-2 animate-spin" />
@@ -1089,14 +1162,17 @@ const AdminProducts: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => {
-                              const newImages = [...localFormData.images]
-                              newImages.splice(index, 1)
-                              setLocalFormData({
-                                ...localFormData,
-                                images: newImages,
-                              })
+                              if (!isSubmitting) {
+                                const newImages = [...localFormData.images]
+                                newImages.splice(index, 1)
+                                setLocalFormData({
+                                  ...localFormData,
+                                  images: newImages,
+                                })
+                              }
                             }}
                             className="p-1 bg-red-500 text-white rounded-full"
+                            disabled={isSubmitting}
                           >
                             <X size={14} />
                           </button>
@@ -1117,19 +1193,32 @@ const AdminProducts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  isEdit ? setShowEditModal(false) : setShowAddModal(false)
-                  resetFormData()
+                  if (!isSubmittingRef.current) {
+                    isEdit ? setShowEditModal(false) : setShowAddModal(false)
+                    resetFormData()
+                  }
                 }}
-                className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isSubmitting}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors flex items-center gap-2"
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Save size={18} />
-                {isEdit ? "Save Changes" : "Add Product"}
+                {isSubmitting ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    {isEdit ? "Saving..." : "Adding..."}
+                  </>
+                ) : (
+                  <>
+                    <Save size={18} />
+                    {isEdit ? "Save Changes" : "Add Product"}
+                  </>
+                )}
               </button>
             </div>
           </form>

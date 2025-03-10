@@ -100,6 +100,16 @@ const Dashboard = () => {
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState<any[]>([])
   const [selectedCategory, setSelectedCategory] = useState("all")
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
+  const [sortBy, setSortBy] = useState("new") // new, trending, profit
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 300) // 300ms delay
+
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -115,29 +125,97 @@ const Dashboard = () => {
         setCategories(categoriesData || [])
       }
 
-      // Fetch products
-      let query = supabase.from("products").select(`
-        *,
-        product_categories!inner(category_id),
-        categories(id, name)
-      `)
+      try {
+        // Fetch products with a different approach for category filtering
+        let query = supabase.from("products").select("*")
 
-      // Apply category filter if not "all"
-      if (selectedCategory !== "all") {
-        query = query.eq("product_categories.category_id", selectedCategory)
-      }
+        // Apply search filter if searchQuery is not empty
+        if (debouncedSearchQuery.trim()) {
+          query = query.ilike("name", `%${debouncedSearchQuery}%`)
+        }
 
-      const { data, error } = await query
+        // Apply date range filter
+        if (dateRange !== "all") {
+          const now = new Date()
+          const startDate = new Date()
 
-      if (error) {
-        console.error("Error fetching products:", error)
-      } else {
-        setProducts(data || [])
+          switch (dateRange) {
+            case "today":
+              startDate.setHours(0, 0, 0, 0) // Start of today
+              break
+            case "week":
+              startDate.setDate(now.getDate() - 7) // 7 days ago
+              break
+            case "month":
+              startDate.setMonth(now.getMonth() - 1) // 1 month ago
+              break
+            case "quarter":
+              startDate.setMonth(now.getMonth() - 3) // 3 months ago
+              break
+          }
+
+          query = query.gte("created_at", startDate.toISOString())
+        }
+
+        // Apply sorting
+        switch (sortBy) {
+          case "new":
+            query = query.order("created_at", { ascending: false })
+            break
+          case "trending":
+            // For trending, we might sort by views or some popularity metric
+            // For now, let's assume there's a field called "views" or "popularity"
+            // If such a field doesn't exist, this will fall back to default sorting
+            query = query.order("views", { ascending: false })
+            break
+          case "profit":
+            query = query.order("profit_margin", { ascending: false })
+            break
+        }
+
+        // Execute the query
+        const { data: productsData, error: productsError } = await query
+
+        if (productsError) {
+          throw productsError
+        }
+
+        // If a category is selected, filter the products after fetching
+        let filteredProducts = productsData || []
+
+        if (selectedCategory !== "all") {
+          // Get all product_categories entries for the selected category
+          const { data: categoryProducts, error: categoryError } = await supabase
+            .from("product_categories")
+            .select("product_id")
+            .eq("category_id", selectedCategory)
+
+          if (categoryError) {
+            throw categoryError
+          }
+
+          // Extract product IDs that belong to the selected category
+          const productIds = categoryProducts.map((item) => item.product_id)
+
+          // Filter products to only include those in the selected category
+          filteredProducts = filteredProducts.filter((product) => productIds.includes(product.id))
+        }
+
+        // If we're showing saved products, filter the results
+        if (showSaved) {
+          const savedIds = Array.from(savedProducts)
+          filteredProducts = filteredProducts.filter((product: any) => savedIds.includes(product.id))
+        }
+
+        // Set the filtered products
+        setProducts(filteredProducts)
+      } catch (error) {
+        console.error("Error fetching and filtering products:", error)
       }
     }
 
     fetchData()
-  }, [selectedCategory])
+  }, [selectedCategory, debouncedSearchQuery, dateRange, sortBy, showSaved, savedProducts])
 
   const toggleSaveProduct = (productId: number) => {
     setSavedProducts((prev) => {
@@ -256,10 +334,14 @@ const Dashboard = () => {
 
           {/* Right Side - Filters */}
           <div className="flex flex-col md:flex-row gap-3">
-            <select className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium">
-              <option>Sort by: New</option>
-              <option>Sort by: Trending</option>
-              <option>Sort by: Profit</option>
+            <select
+              className="bg-white border border-gray-300 rounded-lg px-4 py-2 text-sm font-medium"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+            >
+              <option value="new">Sort by: New</option>
+              <option value="trending">Sort by: Trending</option>
+              <option value="profit">Sort by: Profit</option>
             </select>
 
             <div className="flex items-center gap-2 bg-white border border-gray-300 rounded-lg px-4 py-2">
@@ -295,121 +377,122 @@ const Dashboard = () => {
 
       {/* Products Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {products.map((product: any) => (
-          <div
-            key={product.id}
-            className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200 hover:shadow-md transition-shadow duration-200"
-          >
-            <div className="flex h-[180px]">
-              {/* Product Image */}
-              <div className="relative w-[180px] shrink-0">
-                <img
-                  src={product.images ? product.images[0] : "/"}
-                  alt={product.name}
-                  className="w-full h-full object-cover"
-                />
-                {product.isLocked && (
-                  <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center">
-                    <Lock size={24} className="text-white" />
-                  </div>
-                )}
-              </div>
-
-              {/* Product Info */}
-              <div className="flex-1 p-4 flex flex-col">
-                <div className="flex justify-between items-start gap-2 mb-3">
-                  <div>
-                    <h3 className="font-medium text-gray-900 text-sm mb-1 line-clamp-1">{product.name}</h3>
-                    <p className="text-xs text-gray-500">Posted {product.posted}</p>
-                    {product.categories && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {product.categories.map((category: any) => (
-                          <span
-                            key={category.id}
-                            className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded-full"
-                          >
-                            {category.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Stats Grid */}
-                <div className="grid grid-cols-4 gap-1.5">
-                  {[
-                    { icon: DollarSign, label: "PROFITS", color: "text-green-600" },
-                    { icon: BarChart2, label: "ANALYTICS", color: "text-orange-500" },
-                    { icon: MessageSquare, label: "ENGAGEMENT", color: "text-blue-500" },
-                    { icon: Link, label: "LINKS", color: "text-purple-500" },
-                    { icon: Facebook, label: "FB ADS", color: "text-blue-600" },
-                    { icon: Play, label: "VIDEO", color: "text-red-500" },
-                    { icon: Target, label: "TARGETING", color: "text-indigo-500" },
-                    { icon: Tag, label: "RETAIL PRICE", color: "text-yellow-600" },
-                  ].map((stat, index) => (
-                    <div
-                      key={index}
-                      className="flex flex-col items-center justify-center p-2 bg-gray-50/80 rounded hover:bg-gray-100/80 transition-colors h-[46px]"
-                    >
-                      <stat.icon size={20} className={`${stat.color} md:mb-1`} />
-                      <span className="text-[8px] text-gray-600 font-semibold leading-none text-center uppercase tracking-wider hidden md:block">
-                        {stat.label}
-                      </span>
+        {products.length > 0 ? (
+          products.map((product: any) => (
+            <div
+              key={product.id}
+              className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200 hover:shadow-md transition-shadow duration-200"
+            >
+              <div className="flex h-[180px]">
+                {/* Product Image */}
+                <div className="relative w-[180px] shrink-0">
+                  <img
+                    src={product.images && product.images.length > 0 ? product.images[0] : "/placeholder.svg"}
+                    alt={product.name}
+                    className="w-full h-full object-cover"
+                  />
+                  {product.is_locked && (
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center">
+                      <Lock size={24} className="text-white" />
                     </div>
-                  ))}
+                  )}
+                </div>
+
+                {/* Product Info */}
+                <div className="flex-1 p-4 flex flex-col">
+                  <div className="flex justify-between items-start gap-2 mb-3">
+                    <div>
+                      <h3 className="font-medium text-gray-900 text-sm mb-1 line-clamp-1">{product.name}</h3>
+                      <p className="text-xs text-gray-500">
+                        Posted{" "}
+                        {Math.floor((Date.now() - new Date(product.created_at).getTime()) / (1000 * 60 * 60 * 24))} days
+                        ago
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { icon: DollarSign, label: "PROFITS", color: "text-green-600" },
+                      { icon: BarChart2, label: "ANALYTICS", color: "text-orange-500" },
+                      { icon: MessageSquare, label: "ENGAGEMENT", color: "text-blue-500" },
+                      { icon: Link, label: "LINKS", color: "text-purple-500" },
+                      { icon: Facebook, label: "FB ADS", color: "text-blue-600" },
+                      { icon: Play, label: "VIDEO", color: "text-red-500" },
+                      { icon: Target, label: "TARGETING", color: "text-indigo-500" },
+                      { icon: Tag, label: "RETAIL PRICE", color: "text-yellow-600" },
+                    ].map((stat, index) => (
+                      <div
+                        key={index}
+                        className="flex flex-col items-center justify-center p-2 bg-gray-50/80 rounded hover:bg-gray-100/80 transition-colors h-[46px]"
+                      >
+                        <stat.icon size={20} className={`${stat.color} md:mb-1`} />
+                        <span className="text-[8px] text-gray-600 font-semibold leading-none text-center uppercase tracking-wider hidden md:block">
+                          {stat.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Action Buttons */}
-            <div className="flex gap-3 p-4">
-              <button
-                onClick={() => handleShowMeMoney(product.id)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  product.isLocked
-                    ? "bg-primary hover:bg-primary/90 text-white shadow-sm hover:shadow"
-                    : "bg-secondary hover:bg-secondary/90 text-white shadow-sm hover:shadow"
-                }`}
-              >
-                {product.isLocked ? "Unlock Now" : "Show Me The Money!"}
-              </button>
+              {/* Action Buttons */}
+              <div className="flex gap-3 p-4">
+                <button
+                  onClick={() => handleShowMeMoney(product.id)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                    product.is_locked
+                      ? "bg-primary hover:bg-primary/90 text-white shadow-sm hover:shadow"
+                      : "bg-secondary hover:bg-secondary/90 text-white shadow-sm hover:shadow"
+                  }`}
+                >
+                  {product.is_locked ? "Unlock Now" : "Show Me The Money!"}
+                </button>
 
-              <button
-                onClick={() => toggleSaveProduct(product.id)}
-                className={`px-3 rounded-lg transition-all duration-200 ${
-                  savedProducts.has(product.id)
-                    ? "bg-secondary/10 text-secondary hover:bg-secondary/20"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                <Bookmark size={18} className={savedProducts.has(product.id) ? "fill-secondary" : ""} />
-              </button>
+                <button
+                  onClick={() => toggleSaveProduct(product.id)}
+                  className={`px-3 rounded-lg transition-all duration-200 ${
+                    savedProducts.has(product.id)
+                      ? "bg-secondary/10 text-secondary hover:bg-secondary/20"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  <Bookmark size={18} className={savedProducts.has(product.id) ? "fill-secondary" : ""} />
+                </button>
+              </div>
             </div>
+          ))
+        ) : (
+          <div className="col-span-2 py-12 text-center">
+            <p className="text-gray-500 text-lg">No products found matching your criteria.</p>
+            <p className="text-gray-400 mt-2">Try adjusting your filters or search query.</p>
           </div>
-        ))}
+        )}
       </div>
 
       {/* Pagination */}
-      <div className="flex justify-center mt-8 gap-2 overflow-x-auto">
-        {getPaginationRange().map((page, index) =>
-          page === "..." ? (
-            <span key={`ellipsis-${index}`} className="px-4 py-2 text-gray-600">
-              ...
-            </span>
-          ) : (
-            <button
-              key={page}
-              onClick={() => setCurrentPage(Number(page))}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                currentPage === page ? "bg-primary text-white" : "bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              {page}
-            </button>
-          ),
-        )}
-      </div>
+      {products.length > 0 && (
+        <div className="flex justify-center mt-8 gap-2 overflow-x-auto">
+          {getPaginationRange().map((page, index) =>
+            page === "..." ? (
+              <span key={`ellipsis-${index}`} className="px-4 py-2 text-gray-600">
+                ...
+              </span>
+            ) : (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(Number(page))}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  currentPage === page ? "bg-primary text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {page}
+              </button>
+            ),
+          )}
+        </div>
+      )}
     </div>
   )
 }

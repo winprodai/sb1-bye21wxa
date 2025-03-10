@@ -1,7 +1,20 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
-import { Plus, Search, Filter, Trash2, Edit, ChevronDown, Lock, Unlock, Save, X, ImageIcon } from "lucide-react"
+import React, { useState, useEffect, useRef } from "react"
+import {
+  Plus,
+  Search,
+  Filter,
+  Trash2,
+  Edit,
+  ChevronDown,
+  Lock,
+  Unlock,
+  Save,
+  X,
+  ImageIcon,
+  Loader2,
+} from "lucide-react"
 import { supabase } from "../../lib/supabase"
 
 interface Product {
@@ -63,6 +76,25 @@ interface ProductFormData {
 
 interface ProductWithCategories extends Product {
   categories: Category[]
+}
+
+// Function to check if the storage bucket exists and is accessible
+const checkStorageBucket = async () => {
+  try {
+    // Try to list files in the bucket to check if it exists and is accessible
+    const { data, error } = await supabase.storage.from("productImages").list()
+
+    if (error) {
+      console.error("Error accessing productImages bucket:", error)
+      return false
+    }
+
+    console.log("productImages bucket is accessible")
+    return true
+  } catch (error) {
+    console.error("Error checking storage bucket:", error)
+    return false
+  }
 }
 
 const fetchProductsAPI = async (): Promise<ProductWithCategories[]> => {
@@ -135,6 +167,8 @@ const createProductAPI = async (
   categoryIds: string[],
 ): Promise<ProductWithCategories | null> => {
   try {
+    console.log("Creating product with data:", productData)
+
     // First, create the product
     const { data: product, error: productError } = await supabase.from("products").insert([productData]).select()
 
@@ -142,6 +176,7 @@ const createProductAPI = async (
     if (!product || product.length === 0) return null
 
     const newProduct = product[0]
+    console.log("Product created successfully:", newProduct)
 
     // Then, create the category relationships
     if (categoryIds.length > 0) {
@@ -150,15 +185,20 @@ const createProductAPI = async (
         category_id: categoryId,
       }))
 
+      console.log("Creating category relationships:", categoryRelations)
       const { error: relationError } = await supabase.from("product_categories").insert(categoryRelations)
 
       if (relationError) throw relationError
+      console.log("Category relationships created successfully")
     }
 
     // Return the product with its categories
+    const categories = await getCategoriesForProduct(newProduct.id)
+    console.log("Retrieved categories for product:", categories)
+
     return {
       ...newProduct,
-      categories: await getCategoriesForProduct(newProduct.id),
+      categories,
     }
   } catch (error) {
     console.error("Error creating product:", error)
@@ -313,6 +353,112 @@ const toggleLockAPI = async (product: Product): Promise<ProductWithCategories | 
   }
 }
 
+/**
+ * Create a default "Profit & Cost" addon for a product.
+ * @param product - The product to create the addon for.
+ */
+const createDefaultProfitCostAddon = async (product: ProductWithCategories) => {
+  try {
+    // Create default content for the profit_cost addon
+    const defaultContent = {
+      show_selling_price: true,
+      show_product_cost: true,
+      show_profit_margin: true,
+      selling_price: product.selling_price,
+      product_cost: product.product_cost,
+      profit_margin: (product.selling_price - product.product_cost).toFixed(2),
+      custom_text: "",
+    }
+
+    // Check if this product already has a profit_cost addon
+    const { data: existingAddons, error: checkError } = await supabase
+      .from("product_addons")
+      .select("*")
+      .eq("product_id", product.id)
+      .eq("type", "profit_cost")
+
+    if (checkError) throw checkError
+
+    // Only create if no existing addon of this type for this product
+    if (!existingAddons || existingAddons.length === 0) {
+      const addonData = {
+        type: "profit_cost",
+        title: "Your Profit & Cost",
+        content: JSON.stringify(defaultContent, null, 2),
+        enabled: true,
+        order: 1,
+        product_id: product.id,
+        created_at: new Date(),
+        updated_at: new Date(),
+      }
+
+      const { error } = await supabase.from("product_addons").insert([addonData])
+      if (error) throw error
+      console.log("Created default profit_cost addon for product:", product.id)
+    }
+  } catch (error) {
+    console.error("Error creating default profit_cost addon:", error)
+    // Don't block product creation if addon creation fails
+  }
+}
+
+/**
+ * Update the "Profit & Cost" addon for a product when the product is updated.
+ * @param product - The updated product.
+ */
+const updateProductProfitCostAddon = async (product: ProductWithCategories) => {
+  try {
+    // Find existing profit_cost addon for this product
+    const { data: existingAddons, error: checkError } = await supabase
+      .from("product_addons")
+      .select("*")
+      .eq("product_id", product.id)
+      .eq("type", "profit_cost")
+
+    if (checkError) throw checkError
+
+    if (existingAddons && existingAddons.length > 0) {
+      // Update existing addon
+      const existingAddon = existingAddons[0]
+      let contentObj = {}
+
+      try {
+        contentObj = JSON.parse(existingAddon.content)
+      } catch (e) {
+        // If parsing fails, create new content object
+        contentObj = {
+          show_selling_price: true,
+          show_product_cost: true,
+          show_profit_margin: true,
+          custom_text: "",
+        }
+      }
+
+      // Update the price values
+      contentObj.selling_price = product.selling_price
+      contentObj.product_cost = product.product_cost
+      contentObj.profit_margin = (product.selling_price - product.product_cost).toFixed(2)
+
+      const { error } = await supabase
+        .from("product_addons")
+        .update({
+          content: JSON.stringify(contentObj, null, 2),
+          updated_at: new Date(),
+        })
+        .eq("id", existingAddon.id)
+
+      if (error) throw error
+      console.log("Updated profit_cost addon for product:", product.id)
+    } else {
+      // Create new addon if it doesn't exist
+      await createDefaultProfitCostAddon(product)
+    }
+  } catch (error) {
+    console.error("Error updating profit_cost addon:", error)
+    // Don't block product update if addon update fails
+  }
+}
+
 // Update the convertFormDataToProductData function to exclude category_ids
 const convertFormDataToProductData = (formData: ProductFormData): Partial<Product> => {
   // Calculate profit margin
@@ -340,6 +486,7 @@ const AdminProducts: React.FC = () => {
   // State variables
   const [products, setProducts] = useState<ProductWithCategories[]>([])
   const [loading, setLoading] = useState<boolean>(true)
+  const [uploading, setUploading] = useState<boolean>(false)
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [showAddModal, setShowAddModal] = useState<boolean>(false)
@@ -347,6 +494,7 @@ const AdminProducts: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<ProductWithCategories | null>(null)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [categories, setCategories] = useState<Category[]>([])
+  const [bucketReady, setBucketReady] = useState<boolean>(false)
 
   // Local state for modal form
   const [formData, setFormData] = useState<ProductFormData>({
@@ -354,7 +502,7 @@ const AdminProducts: React.FC = () => {
     description: "",
     selling_price: "",
     product_cost: "",
-    is_locked: true,
+    is_locked: false,
     category_ids: [],
     images: [] as string[],
     stats: {
@@ -388,6 +536,19 @@ const AdminProducts: React.FC = () => {
   // ----------------------------
   // Data Fetching
   // ----------------------------
+
+  // Check if the storage bucket exists
+  useEffect(() => {
+    const checkBucket = async () => {
+      const ready = await checkStorageBucket()
+      setBucketReady(ready)
+      if (!ready) {
+        console.error("Cannot access productImages bucket. Please ensure it exists in your Supabase project.")
+      }
+    }
+
+    checkBucket()
+  }, [])
 
   // Fetch products when component mounts
   useEffect(() => {
@@ -452,7 +613,7 @@ const AdminProducts: React.FC = () => {
       description: "",
       selling_price: "",
       product_cost: "",
-      is_locked: true,
+      is_locked: false,
       category_ids: [],
       images: [],
       stats: {
@@ -488,73 +649,94 @@ const AdminProducts: React.FC = () => {
   /**
    * Handle submission of the add product form.
    */
-  const handleAddProduct = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    // Convert form data to product data (excluding category_ids)
-    const productData = convertFormDataToProductData(formData)
-    const categoryIds = formData.category_ids
-
-    const newProduct = await createProductAPI(productData, categoryIds)
-    if (newProduct) {
-      setProducts([newProduct, ...products])
-      resetFormData()
-      setShowAddModal(false)
-    }
-  }
-
-  /**
-   * Handle submission of the edit product form.
-   */
-  const handleEditProduct = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingProduct) return
-
-    // Convert form data to product data (excluding category_ids)
-    const productData = convertFormDataToProductData(formData)
-    const categoryIds = formData.category_ids
-
-    console.log("Updating product:", editingProduct.id, productData, categoryIds)
-
-    const updated = await updateProductAPI(editingProduct.id, productData, categoryIds)
-    if (updated) {
-      console.log("Product updated successfully:", updated)
-      setProducts(products.map((p) => (p.id === editingProduct.id ? updated : p)))
-      resetFormData()
-      setShowEditModal(false)
-    } else {
-      console.error("Failed to update product")
-    }
-  }
+  // Remove these functions:
+  // const handleAddProduct = async (productFormData: ProductFormData): Promise<void> => { ... }
+  // const handleEditProduct = async (productFormData: ProductFormData): Promise<void> => { ... }
 
   /**
    * Handle image upload and update form data with image URLs.
    * @param files - The files to upload.
    */
   const handleImageUpload = async (files: FileList) => {
+    if (!bucketReady) {
+      alert("Storage bucket 'productImages' is not accessible. Please check your storage policies.")
+      return
+    }
+
     try {
+      setUploading(true)
+
+      // Log the files being uploaded
+      console.log(
+        "Files to upload:",
+        Array.from(files).map((f) => ({ name: f.name, type: f.type, size: f.size })),
+      )
+
       const urls: string[] = []
-      for (const file of Array.from(files)) {
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+
+        // Create a unique file name
         const fileExt = file.name.split(".").pop()
-        const fileName = `${Math.random()}.${fileExt}`
-        const filePath = `product-images/${fileName}` //folder-name, file
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+        const filePath = `${fileName}`
 
-        const { error: uploadError } = await supabase.storage
-          .from("productImages") //bucket name
-          .upload(filePath, file)
-        if (uploadError) throw uploadError
+        console.log(`Uploading file ${i + 1}/${files.length}: ${file.name} as ${filePath}`)
 
-        const { data } = supabase.storage.from("productImages").getPublicUrl(filePath)
-        if (data?.publicUrl) {
-          urls.push(data.publicUrl)
+        // Upload the file
+        const { data, error } = await supabase.storage.from("productImages").upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+        })
+
+        if (error) {
+          console.error(`Error uploading file ${file.name}:`, error.message)
+
+          // Check if it's a permissions error
+          if (error.message.includes("permission") || error.message.includes("policy")) {
+            alert(`Permission denied: ${error.message}. Please check your storage policies.`)
+            setUploading(false)
+            return
+          }
+
+          alert(`Error uploading ${file.name}: ${error.message}`)
+          continue
+        }
+
+        console.log(`File ${i + 1} uploaded successfully:`, data)
+
+        // Get the public URL
+        const { data: publicUrlData } = supabase.storage.from("productImages").getPublicUrl(filePath)
+
+        if (publicUrlData?.publicUrl) {
+          console.log(`Public URL for ${filePath}:`, publicUrlData.publicUrl)
+          urls.push(publicUrlData.publicUrl)
+        } else {
+          console.error(`Failed to get public URL for ${filePath}`)
         }
       }
-      setFormData((prev: ProductFormData) => ({
-        ...prev,
-        images: [...prev.images, ...urls],
-      }))
+
+      if (urls.length > 0) {
+        console.log("Setting form data with new images:", urls)
+
+        // Update the form data with the new image URLs
+        setFormData((prev) => {
+          const updatedFormData = {
+            ...prev,
+            images: [...prev.images, ...urls],
+          }
+          console.log("Updated form data:", updatedFormData)
+          return updatedFormData
+        })
+      } else {
+        alert("No images were uploaded successfully.")
+      }
     } catch (error) {
-      console.error("Error uploading images:", error)
+      console.error("Error in handleImageUpload:", error)
+      alert(`Error uploading images: ${error.message || "Unknown error"}`)
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -600,22 +782,230 @@ const AdminProducts: React.FC = () => {
   }, [isEditing, editingProduct])
 
   const ProductModal = ({ isEdit = false }: { isEdit?: boolean }) => {
+    // Create local state for the form to avoid state update issues
+    const [localFormData, setLocalFormData] = useState<ProductFormData>(() => ({ ...formData }))
+    const [localUploading, setLocalUploading] = useState<boolean>(false)
+    const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
+
+    // Use a ref to track if submission is in progress to prevent duplicate submissions
+    const isSubmittingRef = useRef<boolean>(false)
+    const formRef = useRef<HTMLFormElement>(null)
+
+    // Initialize local form data when modal opens or editing product changes
+    useEffect(() => {
+      console.log("Initializing form data:", formData)
+      setLocalFormData({ ...formData })
+    }, [isEdit, editingProduct])
+
+    // Handle form submission with a direct approach
+    const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault()
+
+      // Prevent multiple submissions
+      if (isSubmittingRef.current) {
+        console.log("Submission already in progress, ignoring click")
+        return
+      }
+
+      // Set both the state and ref to indicate submission is in progress
+      setIsSubmitting(true)
+      isSubmittingRef.current = true
+
+      console.log("Form submission started with data:", localFormData)
+
+      // Use a timeout to ensure UI updates before processing
+      setTimeout(() => {
+        // Process the form submission directly
+        try {
+          // Convert form data to product data
+          const productData = convertFormDataToProductData(localFormData)
+          const categoryIds = localFormData.category_ids
+
+          console.log("Processing submission:", isEdit ? "edit" : "add")
+
+          if (isEdit) {
+            // For editing
+            if (!editingProduct) {
+              throw new Error("No editing product set")
+            }
+
+            // Update the product
+            updateProductAPI(editingProduct.id, productData, categoryIds)
+              .then((updated) => {
+                if (updated) {
+                  console.log("Product updated successfully:", updated)
+
+                  // Update the profit_cost addon for this product
+                  updateProductProfitCostAddon(updated).then(() => {
+                    // Update the products list
+                    setProducts((prevProducts) => prevProducts.map((p) => (p.id === editingProduct.id ? updated : p)))
+
+                    // Reset form and close modal
+                    resetFormData()
+                    setShowEditModal(false)
+                    console.log("Edit completed and modal closed")
+                  })
+                } else {
+                  throw new Error("Failed to update product - API returned null")
+                }
+              })
+              .catch((error) => {
+                console.error("Error updating product:", error)
+                alert(`Error updating product: ${error.message || "Unknown error"}`)
+              })
+              .finally(() => {
+                // Reset submission state
+                setIsSubmitting(false)
+                isSubmittingRef.current = false
+              })
+          } else {
+            // For adding
+            createProductAPI(productData, categoryIds)
+              .then((newProduct) => {
+                if (newProduct) {
+                  console.log("New product created:", newProduct)
+
+                  // Create a default "Profit & Cost" addon for this product
+                  createDefaultProfitCostAddon(newProduct).then(() => {
+                    // Update the products list
+                    setProducts((prevProducts) => [newProduct, ...prevProducts])
+
+                    // Reset form and close modal
+                    resetFormData()
+                    setShowAddModal(false)
+                    console.log("Product added successfully and modal closed")
+                  })
+                } else {
+                  throw new Error("Failed to create product - API returned null")
+                }
+              })
+              .catch((error) => {
+                console.error("Error in handleAddProduct:", error)
+                alert(`Error adding product: ${error.message || "Unknown error"}`)
+              })
+              .finally(() => {
+                // Reset submission state
+                setIsSubmitting(false)
+                isSubmittingRef.current = false
+              })
+          }
+        } catch (error) {
+          console.error("Error processing form:", error)
+          alert(`Error ${isEdit ? "updating" : "adding"} product: ${error.message || "Unknown error"}`)
+
+          // Reset submission state
+          setIsSubmitting(false)
+          isSubmittingRef.current = false
+        }
+      }, 0)
+    }
+
+    // Handle image upload directly in the modal component
+    const handleLocalImageUpload = async (files: FileList) => {
+      if (!bucketReady) {
+        alert("Storage bucket 'productImages' is not accessible. Please check your storage policies.")
+        return
+      }
+
+      try {
+        setLocalUploading(true)
+
+        // Log the files being uploaded
+        console.log(
+          "Files to upload:",
+          Array.from(files).map((f) => ({ name: f.name, type: f.type, size: f.size })),
+        )
+
+        const urls: string[] = []
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i]
+
+          // Create a unique file name
+          const fileExt = file.name.split(".").pop()
+          const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`
+          const filePath = `${fileName}`
+
+          console.log(`Uploading file ${i + 1}/${files.length}: ${file.name} as ${filePath}`)
+
+          // Upload the file
+          const { data, error } = await supabase.storage.from("productImages").upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+          })
+
+          if (error) {
+            console.error(`Error uploading file ${file.name}:`, error.message)
+
+            // Check if it's a permissions error
+            if (error.message.includes("permission") || error.message.includes("policy")) {
+              alert(`Permission denied: ${error.message}. Please check your storage policies.`)
+              setLocalUploading(false)
+              return
+            }
+
+            alert(`Error uploading ${file.name}: ${error.message}`)
+            continue
+          }
+
+          console.log(`File ${i + 1} uploaded successfully:`, data)
+
+          // Get the public URL
+          const { data: publicUrlData } = supabase.storage.from("productImages").getPublicUrl(filePath)
+
+          if (publicUrlData?.publicUrl) {
+            console.log(`Public URL for ${filePath}:`, publicUrlData.publicUrl)
+            urls.push(publicUrlData.publicUrl)
+          } else {
+            console.error(`Failed to get public URL for ${filePath}`)
+          }
+        }
+
+        if (urls.length > 0) {
+          console.log("Setting local form data with new images:", urls)
+
+          // Update the local form data with the new image URLs
+          setLocalFormData((prev) => {
+            const updatedFormData = {
+              ...prev,
+              images: [...prev.images, ...urls],
+            }
+            console.log("Updated local form data:", updatedFormData)
+            return updatedFormData
+          })
+
+          alert(`Successfully uploaded ${urls.length} image(s)`)
+        } else {
+          alert("No images were uploaded successfully.")
+        }
+      } catch (error) {
+        console.error("Error in handleLocalImageUpload:", error)
+        alert(`Error uploading images: ${error.message || "Unknown error"}`)
+      } finally {
+        setLocalUploading(false)
+      }
+    }
+
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         <div className="bg-white rounded-xl p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold">{isEdit ? "Edit Product" : "Add New Product"}</h2>
             <button
+              type="button"
               onClick={() => {
-                isEdit ? setShowEditModal(false) : setShowAddModal(false)
-                resetFormData()
+                if (!isSubmittingRef.current) {
+                  isEdit ? setShowEditModal(false) : setShowAddModal(false)
+                  resetFormData()
+                }
               }}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              disabled={isSubmitting}
             >
               <X size={20} className="text-gray-500" />
             </button>
           </div>
-          <form onSubmit={isEdit ? handleEditProduct : handleAddProduct} className="space-y-6">
+          <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
             {/* Basic Information */}
             <div className="bg-gray-50 rounded-lg p-4">
               <h3 className="text-lg font-medium mb-4">Basic Information</h3>
@@ -623,42 +1013,40 @@ const AdminProducts: React.FC = () => {
                 <input
                   type="text"
                   placeholder="Product Name"
-                  value={formData.name || ""}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                  value={localFormData.name || ""}
+                  onChange={(e) => setLocalFormData({ ...localFormData, name: e.target.value })}
                   required
                   className="border p-2 mb-2 w-full"
+                  disabled={isSubmitting}
                 />
                 <textarea
                   placeholder="Product Description"
-                  value={formData.description || ""}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+                  value={localFormData.description || ""}
+                  onChange={(e) => setLocalFormData({ ...localFormData, description: e.target.value })}
                   required
                   className="border p-2 mb-2 w-full"
+                  disabled={isSubmitting}
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <input
                     type="number"
                     step="0.01"
                     placeholder="Selling Price"
-                    value={formData.selling_price}
-                    onChange={(e) => {
-                      const newValue = e.target.value
-                      setFormData((prev: ProductFormData) => ({ ...prev, selling_price: newValue }))
-                    }}
+                    value={localFormData.selling_price}
+                    onChange={(e) => setLocalFormData({ ...localFormData, selling_price: e.target.value })}
                     required
                     className="border p-2 mb-2 w-full"
+                    disabled={isSubmitting}
                   />
                   <input
                     type="number"
                     step="0.01"
                     placeholder="Product Cost"
-                    value={formData.product_cost}
-                    onChange={(e) => {
-                      const newValue = e.target.value
-                      setFormData((prev: ProductFormData) => ({ ...prev, product_cost: newValue }))
-                    }}
+                    value={localFormData.product_cost}
+                    onChange={(e) => setLocalFormData({ ...localFormData, product_cost: e.target.value })}
                     required
                     className="border p-2 mb-2 w-full"
+                    disabled={isSubmitting}
                   />
                 </div>
 
@@ -671,21 +1059,22 @@ const AdminProducts: React.FC = () => {
                         <input
                           type="checkbox"
                           id={`category-${category.id}`}
-                          checked={formData.category_ids.includes(category.id)}
+                          checked={localFormData.category_ids.includes(category.id)}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setFormData((prev: ProductFormData) => ({
-                                ...prev,
-                                category_ids: [...prev.category_ids, category.id],
-                              }))
+                              setLocalFormData({
+                                ...localFormData,
+                                category_ids: [...localFormData.category_ids, category.id],
+                              })
                             } else {
-                              setFormData((prev: ProductFormData) => ({
-                                ...prev,
-                                category_ids: prev.category_ids.filter((id) => id !== category.id),
-                              }))
+                              setLocalFormData({
+                                ...localFormData,
+                                category_ids: localFormData.category_ids.filter((id) => id !== category.id),
+                              })
                             }
                           }}
                           className="rounded border-gray-300"
+                          disabled={isSubmitting}
                         />
                         <label htmlFor={`category-${category.id}`} className="text-sm">
                           {category.name}
@@ -699,23 +1088,19 @@ const AdminProducts: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={formData.is_top_product || false}
-                    onChange={(e) => {
-                      const newValue = e.target.checked
-                      setFormData((prev: ProductFormData) => ({ ...prev, is_top_product: newValue }))
-                    }}
+                    checked={localFormData.is_top_product || false}
+                    onChange={(e) => setLocalFormData({ ...localFormData, is_top_product: e.target.checked })}
+                    disabled={isSubmitting}
                   />
                   <label>Top Product</label>
                 </div>
                 <input
                   type="number"
                   placeholder="Priority"
-                  value={formData.priority}
-                  onChange={(e) => {
-                    const newValue = Number(e.target.value)
-                    setFormData((prev: ProductFormData) => ({ ...prev, priority: newValue }))
-                  }}
+                  value={localFormData.priority}
+                  onChange={(e) => setLocalFormData({ ...localFormData, priority: Number(e.target.value) })}
                   className="border p-2 mb-2 w-full"
+                  disabled={isSubmitting}
                 />
               </div>
             </div>
@@ -727,38 +1112,79 @@ const AdminProducts: React.FC = () => {
                   type="file"
                   multiple
                   accept="image/*"
-                  onChange={(e) => e.target.files && handleImageUpload(e.target.files)}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      // Call the local image upload handler
+                      handleLocalImageUpload(e.target.files)
+                    }
+                  }}
                   className="hidden"
                   id="images"
+                  disabled={isSubmitting || localUploading}
                 />
-                <label htmlFor="images" className="flex flex-col items-center justify-center cursor-pointer">
-                  <ImageIcon className="h-8 w-8 text-gray-400 mb-2" />
-                  <span className="text-sm text-gray-500">Click to upload images</span>
+                <label
+                  htmlFor="images"
+                  className={`flex flex-col items-center justify-center ${isSubmitting || localUploading ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+                >
+                  {localUploading ? (
+                    <div className="flex flex-col items-center">
+                      <Loader2 className="h-8 w-8 text-gray-400 mb-2 animate-spin" />
+                      <span className="text-sm text-gray-500">Uploading images...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <ImageIcon className="h-8 w-8 text-gray-400 mb-2" />
+                      <span className="text-sm text-gray-500">Click to upload images</span>
+                      <span className="text-xs text-gray-400 mt-1">First image will be used as the main image</span>
+                    </>
+                  )}
                 </label>
               </div>
-              {formData.images && formData.images.length > 0 && (
-                <div className="mt-4 grid grid-cols-4 gap-4">
-                  {formData.images.map((url: string, index: number) => (
-                    <div key={index} className="relative group">
-                      <img
-                        src={url || "/placeholder.svg"}
-                        alt={`Preview ${index + 1}`}
-                        className="h-24 w-full object-cover rounded-lg"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFormData((prev: ProductFormData) => ({
-                            ...prev,
-                            images: prev.images.filter((_: any, i: number) => i !== index),
-                          }))
-                        }
-                        className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
+              {localFormData.images && localFormData.images.length > 0 && (
+                <div className="mt-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-medium">Uploaded Images ({localFormData.images.length})</h4>
+                    <p className="text-xs text-gray-500">First image is main</p>
+                  </div>
+                  <div className="grid grid-cols-4 gap-4">
+                    {localFormData.images.map((url, index) => (
+                      <div key={index} className="relative group">
+                        <img
+                          src={url || "/placeholder.svg"}
+                          alt={`Preview ${index + 1}`}
+                          className="h-24 w-full object-cover rounded-lg border border-gray-200"
+                          onError={(e) => {
+                            // If image fails to load, replace with placeholder
+                            ;(e.target as HTMLImageElement).src = "/placeholder.svg"
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isSubmitting) {
+                                const newImages = [...localFormData.images]
+                                newImages.splice(index, 1)
+                                setLocalFormData({
+                                  ...localFormData,
+                                  images: newImages,
+                                })
+                              }
+                            }}
+                            className="p-1 bg-red-500 text-white rounded-full"
+                            disabled={isSubmitting}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        {index === 0 && (
+                          <div className="absolute top-1 left-1 bg-primary text-white text-xs px-2 py-0.5 rounded">
+                            Main
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -767,19 +1193,32 @@ const AdminProducts: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  isEdit ? setShowEditModal(false) : setShowAddModal(false)
-                  resetFormData()
+                  if (!isSubmittingRef.current) {
+                    isEdit ? setShowEditModal(false) : setShowAddModal(false)
+                    resetFormData()
+                  }
                 }}
-                className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+                className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isSubmitting}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors flex items-center gap-2"
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Save size={18} />
-                {isEdit ? "Save Changes" : "Add Product"}
+                {isSubmitting ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    {isEdit ? "Saving..." : "Adding..."}
+                  </>
+                ) : (
+                  <>
+                    <Save size={18} />
+                    {isEdit ? "Save Changes" : "Add Product"}
+                  </>
+                )}
               </button>
             </div>
           </form>

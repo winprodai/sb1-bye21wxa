@@ -736,14 +736,6 @@ const ProductDetails = () => {
             {/* Render Monthly Revenue addon if enabled */}
             {renderAddonSection("monthly_revenue")}
 
-            <div className="block sm:hidden bg-white rounded-xl overflow-hidden border border-gray-200">
-              <img
-                src="https://i.postimg.cc/0jv2zc4J/shopify-Banner-8b9252e6.webp"
-                alt="Start with Shopify"
-                className="w-full h-auto"
-              />
-            </div>
-
             {/* Render Marketplace Links addon if enabled */}
             {renderAddonSection("marketplace_links")}
 

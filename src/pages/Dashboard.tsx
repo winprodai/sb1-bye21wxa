@@ -125,85 +125,92 @@ const Dashboard = () => {
         setCategories(categoriesData || [])
       }
 
-      // Fetch products
-      let query = supabase.from("products").select(`
-  *,
-  product_categories(category_id),
-  categories(id, name)
-`)
+      try {
+        // Fetch products with a different approach for category filtering
+        let query = supabase.from("products").select("*")
 
-      // Apply category filter if not "all"
-      if (selectedCategory !== "all") {
-        query = query.eq("product_categories.category_id", selectedCategory)
-      }
+        // Apply search filter if searchQuery is not empty
+        if (debouncedSearchQuery.trim()) {
+          query = query.ilike("name", `%${debouncedSearchQuery}%`)
+        }
 
-      // Apply search filter if searchQuery is not empty
-      if (debouncedSearchQuery.trim()) {
-        query = query.ilike("name", `%${debouncedSearchQuery}%`)
-      }
+        // Apply date range filter
+        if (dateRange !== "all") {
+          const now = new Date()
+          const startDate = new Date()
 
-      // Apply date range filter
-      if (dateRange !== "all") {
-        const now = new Date()
-        const startDate = new Date()
+          switch (dateRange) {
+            case "today":
+              startDate.setHours(0, 0, 0, 0) // Start of today
+              break
+            case "week":
+              startDate.setDate(now.getDate() - 7) // 7 days ago
+              break
+            case "month":
+              startDate.setMonth(now.getMonth() - 1) // 1 month ago
+              break
+            case "quarter":
+              startDate.setMonth(now.getMonth() - 3) // 3 months ago
+              break
+          }
 
-        switch (dateRange) {
-          case "today":
-            startDate.setHours(0, 0, 0, 0) // Start of today
+          query = query.gte("created_at", startDate.toISOString())
+        }
+
+        // Apply sorting
+        switch (sortBy) {
+          case "new":
+            query = query.order("created_at", { ascending: false })
             break
-          case "week":
-            startDate.setDate(now.getDate() - 7) // 7 days ago
+          case "trending":
+            // For trending, we might sort by views or some popularity metric
+            // For now, let's assume there's a field called "views" or "popularity"
+            // If such a field doesn't exist, this will fall back to default sorting
+            query = query.order("views", { ascending: false })
             break
-          case "month":
-            startDate.setMonth(now.getMonth() - 1) // 1 month ago
-            break
-          case "quarter":
-            startDate.setMonth(now.getMonth() - 3) // 3 months ago
+          case "profit":
+            query = query.order("profit_margin", { ascending: false })
             break
         }
 
-        query = query.gte("created_at", startDate.toISOString())
-      }
+        // Execute the query
+        const { data: productsData, error: productsError } = await query
 
-      // Apply sorting
-      switch (sortBy) {
-        case "new":
-          query = query.order("created_at", { ascending: false })
-          break
-        case "trending":
-          // For trending, we might sort by views or some popularity metric
-          // For now, let's assume there's a field called "views" or "popularity"
-          // If such a field doesn't exist, this will fall back to default sorting
-          query = query.order("views", { ascending: false })
-          break
-        case "profit":
-          query = query.order("profit_margin", { ascending: false })
-          break
-      }
+        if (productsError) {
+          throw productsError
+        }
 
-      const { data, error } = await query
+        // If a category is selected, filter the products after fetching
+        let filteredProducts = productsData || []
 
-      if (error) {
-        console.error("Error fetching products:", error)
-      } else {
+        if (selectedCategory !== "all") {
+          // Get all product_categories entries for the selected category
+          const { data: categoryProducts, error: categoryError } = await supabase
+            .from("product_categories")
+            .select("product_id")
+            .eq("category_id", selectedCategory)
+
+          if (categoryError) {
+            throw categoryError
+          }
+
+          // Extract product IDs that belong to the selected category
+          const productIds = categoryProducts.map((item) => item.product_id)
+
+          // Filter products to only include those in the selected category
+          filteredProducts = filteredProducts.filter((product) => productIds.includes(product.id))
+        }
+
         // If we're showing saved products, filter the results
         if (showSaved) {
           const savedIds = Array.from(savedProducts)
-          setProducts((data || []).filter((product: any) => savedIds.includes(product.id)))
-        } else {
-          const processedProducts = (data || []).map((product) => {
-            // Process categories to make them accessible in the UI
-            if (product.categories) {
-              product.categories = Array.isArray(product.categories)
-                ? product.categories
-                : [product.categories].filter(Boolean)
-            } else {
-              product.categories = []
-            }
-            return product
-          })
-          setProducts(processedProducts)
+          filteredProducts = filteredProducts.filter((product: any) => savedIds.includes(product.id))
         }
+
+        // Set the filtered products
+        setProducts(filteredProducts)
+      } catch (error) {
+        console.error("Error fetching and filtering products:", error)
       }
     }
 
@@ -401,18 +408,6 @@ const Dashboard = () => {
                         {Math.floor((Date.now() - new Date(product.created_at).getTime()) / (1000 * 60 * 60 * 24))} days
                         ago
                       </p>
-                      {product.categories && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {product.categories.map((category: any) => (
-                            <span
-                              key={category.id}
-                              className="px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded-full"
-                            >
-                              {category.name}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
 

@@ -502,7 +502,7 @@ const AdminProducts: React.FC = () => {
     description: "",
     selling_price: "",
     product_cost: "",
-    is_locked: true,
+    is_locked: false,
     category_ids: [],
     images: [] as string[],
     stats: {
@@ -613,7 +613,7 @@ const AdminProducts: React.FC = () => {
       description: "",
       selling_price: "",
       product_cost: "",
-      is_locked: true,
+      is_locked: false,
       category_ids: [],
       images: [],
       stats: {
